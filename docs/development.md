@@ -44,6 +44,19 @@ Three more worth running before a pull request or a release, all runnable the sa
 | `uv run python tools/check_production.py` | That the installation is configured for production: `OMRON_DEBUG` off, a private secret, a writable database, every migration applied |
 | `uv run python tools/check_no_private_data.py` | That the working tree carries no private data |
 
+## Releasing
+
+A release is an annotated `X.Y.Z` tag on `main` with a clean working tree; pushing the tag
+triggers `.github/workflows/release.yml`, which builds, attests and publishes the image.
+`tools/tag_release.ps1` creates the tag on a clean `main`, bumping the patch version of the
+latest stable tag unless `-Version X.Y.Z` is given, and `-Push` pushes it:
+
+```powershell
+pwsh tools/tag_release.ps1 -Push
+```
+
+It is a host-side maintainer script and is not copied into the image.
+
 To run the app from a working copy, collect the static files first and then serve it with
 the same entry point the image uses:
 
