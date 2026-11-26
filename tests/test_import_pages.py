@@ -379,6 +379,27 @@ def test_purge_stale_keeps_a_pattern_shaped_directory_the_application_did_not_cr
     assert (impostor / "export.csv").is_file()
 
 
+def test_cancel_removes_a_staged_import():
+    import_id = pending.new_import_id()
+    pending.save(import_id, "export.csv", b"Datum\n")
+
+    pending.discard(import_id)
+
+    assert not (pending.pending_root() / import_id).exists()
+
+
+def test_cancel_keeps_a_pattern_shaped_directory_the_application_did_not_create():
+    root = pending.pending_root()
+    root.mkdir(parents=True, exist_ok=True)
+    impostor = root / pending.new_import_id()
+    impostor.mkdir()
+    (impostor / "export.csv").write_text("Datum\n", encoding="utf-8")
+
+    pending.discard(impostor.name)
+
+    assert (impostor / "export.csv").is_file()
+
+
 @pytest.mark.django_db
 def test_the_preview_shows_the_counts_the_import_would_write(client, alice):
     client.force_login(alice)
