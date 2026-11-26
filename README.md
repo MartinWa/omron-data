@@ -145,7 +145,7 @@ the endpoints; `/api/v1/openapi.json` is the schema.
 | Path | What it returns |
 |---|---|
 | `/api/v1/` | the contract version and the endpoint list |
-| `/api/v1/healthz` | liveness, and the only endpoint that needs no token |
+| `/api/v1/healthz` | liveness, and the only data endpoint that needs no token |
 | `/api/v1/metrics` | the metric registry with units and whether a code is a panel, a component or a plain reading |
 | `/api/v1/measurements` | a page of readings, `level=panel` by default |
 | `/api/v1/measurements/{id}` | one row plus its components |

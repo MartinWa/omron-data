@@ -98,7 +98,16 @@ def test_gitignore_starts_with_the_private_directories():
     patterns = ignore_patterns(".gitignore")
 
     assert patterns[:2] == ["planning/", "reference/"]
-    for required in ("data/", ".data/", "*.sqlite3-*", "*.csv", ".venv/", "staticfiles/"):
+    for required in (
+        "data/",
+        ".data/",
+        "*.sqlite3-*",
+        "*.backup*",
+        "*.bak",
+        "*.csv",
+        ".venv/",
+        "staticfiles/",
+    ):
         assert required in patterns
 
 
@@ -263,6 +272,7 @@ def test_production_image_copies_the_directories_the_settings_need():
         "COPY templates /app/templates",
     ):
         assert needed in stage
+    assert "pyproject.toml" in stage
     assert "OMRON_STATIC_ROOT=/app/staticfiles" in stage
 
 
@@ -302,6 +312,17 @@ def test_private_data_scan_allows_source_files():
     assert find_violations(paths) == []
 
 
+def test_a_database_backup_is_ignored_and_refused_by_name():
+    patterns = ignore_patterns(".gitignore")
+    docker = ignore_patterns(".dockerignore")
+    name = "db.sqlite3.backup-20261126-135446"
+
+    assert "*.backup*" in patterns
+    assert "*.backup*" in docker
+    assert find_violations([name]) == [name]
+    assert find_violations(["docs/backup-and-recovery.md"]) == []
+
+
 def test_private_data_scan_rejects_private_files():
     paths = [
         "export.csv",
@@ -314,6 +335,9 @@ def test_private_data_scan_rejects_private_files():
         "api-token.json",
         "planning/plan.md",
         "reference/init.sql",
+        "db.sqlite3.backup-20261126-135446",
+        "omron.sqlite3.bak",
+        "history.db.backup",
     ]
 
     assert find_violations(paths) == sorted(paths)

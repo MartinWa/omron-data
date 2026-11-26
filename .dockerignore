@@ -18,6 +18,9 @@ data/
 *.dump
 *.bak
 *.backup
+*.backup*
+*.sqlite3.backup*
+*.db.backup*
 *.sql
 *.gz
 *.tgz

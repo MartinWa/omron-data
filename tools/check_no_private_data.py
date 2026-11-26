@@ -28,6 +28,7 @@ BAD_SUFFIXES = (
     ".zip",
 )
 SIDECAR_MARKERS = (".db-", ".sqlite-", ".sqlite3-")
+BACKUP_MARKERS = (".backup", ".bak")
 PRIVATE_DIRECTORIES = frozenset({"planning", "reference"})
 TOKEN_FILE_NAME = re.compile(r"^(?:[A-Za-z0-9_.-]*[-_.])?tokens?\.(?:json|txt|ya?ml|key|pem)$")
 SKIPPED_DIRECTORIES = frozenset(
@@ -71,6 +72,8 @@ def is_violation(path: str) -> bool:
     if name.startswith(".env") and name != ".env.example":
         return True
     if any(marker in name for marker in SIDECAR_MARKERS):
+        return True
+    if any(marker in name for marker in BACKUP_MARKERS):
         return True
     if TOKEN_FILE_NAME.match(name):
         return True

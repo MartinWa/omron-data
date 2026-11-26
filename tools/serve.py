@@ -13,6 +13,7 @@ from django.core.management import call_command
 from waitress import serve
 
 from omron_data.wsgi import application
+from records.limits import MAX_REQUEST_BODY_BYTES
 
 DEFAULT_PORT = 8000
 DEFAULT_THREADS = 8
@@ -61,6 +62,7 @@ def main() -> int:
         listen=listen,
         threads=threads,
         channel_timeout=CHANNEL_TIMEOUT_SECONDS,
+        max_request_body_size=MAX_REQUEST_BODY_BYTES,
         ident="omron-data",
     )
     return 0

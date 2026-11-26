@@ -127,7 +127,7 @@ WSGI_APPLICATION = "omron_data.wsgi.application"
 DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.sqlite3",
-        "NAME": os.environ.get("OMRON_DB_PATH", BASE_DIR / ".data" / "db.sqlite3"),
+        "NAME": read_setting("OMRON_DB_PATH") or BASE_DIR / ".data" / "db.sqlite3",
         "OPTIONS": {"timeout": 20},
     }
 }

@@ -1,4 +1,4 @@
-from .contract import STATUS_CODES, error_response, is_api_path
+from .contract import API_PREFIX, STATUS_CODES, error_response, is_api_path
 
 CONVERTED_STATUSES = (400, 403, 404, 405, 500)
 
@@ -29,5 +29,9 @@ class ApiResponseMiddleware:
             request.method = "GET"
         elif request.method != "GET":
             return error_response(405, "method_not_allowed", "This API is read-only")
+        if request.path == API_PREFIX.rstrip("/"):
+            return error_response(
+                404, "not_found", f"The API lives at {API_PREFIX}, with a trailing slash"
+            )
         response = self.get_response(request)
         return _converted(response) or response

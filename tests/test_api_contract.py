@@ -346,12 +346,13 @@ def test_the_openapi_schema_documents_the_error_responses(auth):
     assert "401" not in schema["paths"]["/api/v1/healthz"]["get"]["responses"]
 
 
-def test_the_api_base_url_without_a_slash_does_not_answer_reads(auth):
+def test_the_api_base_url_without_a_slash_is_refused_with_the_envelope(auth):
     response = auth.get("/api/v1")
 
-    assert response.status_code == 301
-    assert response["Location"] == "/api/v1/"
+    assert response.status_code == 404
+    assert response["Content-Type"].startswith("application/json")
     assert response["Cache-Control"] == "no-store"
+    assert "/api/v1/" in response.json()["error"]["message"]
 
 
 def test_a_write_to_the_api_base_url_is_refused_rather_than_redirected(auth):

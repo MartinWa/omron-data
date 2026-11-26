@@ -62,7 +62,7 @@ COPY omron_data /app/omron_data
 COPY parsing /app/parsing
 COPY records /app/records
 COPY templates /app/templates
-COPY LICENSE NOTICE /app/
+COPY pyproject.toml LICENSE NOTICE /app/
 COPY tools/__init__.py tools/check_production.py tools/healthcheck.py tools/serve.py /app/tools/
 # collectstatic fills /app/staticfiles at build time: WhiteNoise reads that
 # directory from the image layer and the container root stays read-only.

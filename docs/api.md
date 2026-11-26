@@ -91,7 +91,7 @@ has no value of its own, so its `value` is `null` and its numbers are on its com
 | Path | Parameters | Returns |
 | --- | --- | --- |
 | `GET /api/v1/` | none | the contract version, the service name and the endpoint list |
-| `GET /api/v1/healthz` | none | `status: "ok"`; the only endpoint that needs no token |
+| `GET /api/v1/healthz` | none | `status: "ok"`; the only data endpoint that needs no token |
 | `GET /api/v1/metrics` | none | the metric registry: `code`, `unit` and `kind` for all 16 codes |
 | `GET /api/v1/measurements` | `metric`, `since`, `until`, `level`, `include`, `sort`, `limit`, `offset` | a page of readings, `level=panel` by default |
 | `GET /api/v1/measurements/{id}` | none | one row plus its components |

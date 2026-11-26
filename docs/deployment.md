@@ -55,7 +55,7 @@ directory is not writable by the UID it runs as.
 | `OMRON_SECRET_KEY_FILE` | empty | Path to a file holding the secret, for Docker or Podman secrets. Read only when `OMRON_SECRET_KEY` is empty. Every setting accepts the same `<NAME>_FILE` form |
 | `OMRON_ALLOWED_HOSTS` | `127.0.0.1,localhost` | Comma-separated hostnames the proxy forwards, for example `omron.example.com`. A request with any other `Host` header is refused |
 | `OMRON_CSRF_TRUSTED_ORIGINS` | empty | Comma-separated `https://` origins; needed only when the proxy rewrites the `Host` header |
-| `OMRON_TIME_ZONE` | `Europe/Stockholm` | IANA zone name. The export records wall-clock times with no offset, so imports are read in this zone, impossible timestamps are reported against it, and every date in the UI and API is rendered in it. It applies at import time: changing it later does not rewrite stored rows |
+| `OMRON_TIME_ZONE` | `Europe/Stockholm` | IANA zone name. The export records wall-clock times with no offset, so imports are read in this zone, impossible timestamps are reported against it, and every date in the UI is rendered in it, while the API answers in UTC with a `Z` suffix. It applies at import time: changing it later does not rewrite stored rows |
 | `OMRON_DEBUG` | `false` | Set by the development image only. With it on, a fixed development secret is accepted and the session and CSRF cookies are not `Secure`; never enable it on an instance that is reachable |
 | `OMRON_DB_PATH` | `.data/db.sqlite3` in a working copy; `/app/data/omron.sqlite3` in the image | The SQLite file. The image sets it, and the production Compose file passes nothing for it, so the database is always the file behind the `data` mount |
 | `OMRON_STATIC_ROOT` | `staticfiles/` in a working copy; `/app/staticfiles` in the image | Where `collectstatic` writes and where WhiteNoise reads. The image sets it |
@@ -114,7 +114,8 @@ docker compose ps
 curl -fsS https://omron.example.com/api/v1/healthz
 ```
 
-That endpoint is the only one that needs no token, so it is the one to put in a monitor.
+That endpoint is the only data endpoint that needs no token (the schema and the docs page are
+open too, and carry no data), so it is the one to put in a monitor.
 `/admin/` exists for an administrator; the pages a person uses are in the header:
 *Readings*, *Imports* and *Tokens*.
 
@@ -158,8 +159,9 @@ never sees another account's readings outside the admin.
 Two patterns cover the usual home lab setups. Terminate TLS at the proxy, keep the app
 unreachable from the public network except through it, and raise the proxy's body limit
 only as far as needed for the 10 MB upload limit. The application refuses a request body
-above 11 MB before reading it, so a proxy that forgets its own limit cannot be used to
-fill the container's temporary storage.
+above 11 MB before reading it, and `tools/serve.py` caps what waitress will spool at
+`MAX_REQUEST_BODY_BYTES` (11 MB), so a proxy that forgets its own limit cannot fill the
+container's temporary storage.
 
 ### A proxy container on a shared Docker network
 
