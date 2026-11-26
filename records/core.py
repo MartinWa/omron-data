@@ -8,7 +8,7 @@ from ninja.schema import NinjaGenerateJsonSchema
 from pydantic.json_schema import models_json_schema
 
 from .auth import ApiTokenAuth
-from .contract import STATUS_CODES, ApiError, error_response
+from .contract import CONTRACT_VERSION, STATUS_CODES, ApiError, error_response
 from .schemas import ErrorOut
 
 logger = logging.getLogger("django")
@@ -48,7 +48,7 @@ def _from_status(status, details=None):
 
 api = DocumentedNinjaAPI(
     title="omron-data API",
-    version="1.0.0",
+    version=CONTRACT_VERSION,
     description="Read-only, owner-scoped OMRON connect measurement history.",
     openapi_url="/openapi.json",
     docs_url="/docs",
