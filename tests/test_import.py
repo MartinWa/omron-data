@@ -367,7 +367,9 @@ def test_api_returns_only_owned_rows(owner):
     import_readings(other, parse_text(REPORT))
     token = issue(owner, "test")
 
-    response = Client().get("/api/v1/measurements", headers={"authorization": f"Bearer {token}"})
+    response = Client().get(
+        "/api/v1/measurements?level=all", headers={"authorization": f"Bearer {token}"}
+    )
 
     assert response.status_code == 200
     rows = response.json()

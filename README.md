@@ -55,9 +55,35 @@ zone the export's wall clocks are read in (default `Europe/Stockholm`).
 curl -H "authorization: Bearer $TOKEN" http://localhost:8000/api/v1/summary
 curl -H "authorization: Bearer $TOKEN" \
   'http://localhost:8000/api/v1/measurements?metric=body_weight&since=2026-08-01T00:00:00%2B02:00'
+curl -H "authorization: Bearer $TOKEN" \
+  'http://localhost:8000/api/v1/measurements?level=component&metric=systolic_bp&limit=500'
 ```
 
-`/api/v1/docs` documents the endpoints. Every query is scoped to the token's owner.
+Every response carries an envelope with `contract_version` and `generated_at`, errors
+included, so a client can tell a contract change from a data change. `/api/v1/docs` renders
+the endpoints; `/api/v1/openapi.json` is the schema.
+
+| Path | What it returns |
+|---|---|
+| `/api/v1/` | the contract version and the endpoint list |
+| `/api/v1/healthz` | liveness, and the only endpoint that needs no token |
+| `/api/v1/metrics` | the metric registry with units and whether a code is a panel, a component or a plain reading |
+| `/api/v1/measurements` | a page of readings, `level=panel` by default |
+| `/api/v1/measurements/{id}` | one row plus its components |
+| `/api/v1/summary` | per-metric count and coverage |
+| `/api/v1/imports` | the import ledger, with the covered span |
+
+`level` is `panel` (blood-pressure events and standalone body readings), `component` (the
+systolic, diastolic and pulse rows inside a panel) or `all`; `include=components` inlines a
+panel's components, `sort` takes `at`, `metric`, `value` or `id` and defaults to `-at`, and
+`limit`/`offset` page the result. `limit` is at most 1000 and a `since`/`until` window may
+span at most 1830 days.
+
+Filtering is strict: an unknown or repeated parameter, an unknown metric, a component metric
+at panel level, an unsupported sort key, a missing UTC offset or a window that is too wide is
+a 422 with the reason in the body rather than an empty page. The API is read-only, so any
+method other than `GET` or `HEAD` is a 405. Every query is scoped to the token's owner, and
+another owner's id is a 404 rather than a 403.
 
 ## Exports are windows
 
