@@ -210,7 +210,9 @@ authenticates.
 
 `/dashboards/` turns the stored history into six KPI cards, five chart cards and a list of
 extremes. Every number on the page comes from the stored rows, so a reading you have not
-imported cannot appear in a chart.
+imported cannot appear in a chart. The line under the heading states the window, how many
+readings it holds, how long ago the newest of them was taken (*last reading today*, or
+*last reading N days ago*) and when the last import ran.
 
 ### The range control
 
@@ -225,27 +227,61 @@ of empty charts, and an account with no readings at all is sent to the import pa
 
 | Card | Shows |
 | --- | --- |
-| *Latest blood pressure*, *7-day average*, *Latest weight*, *Weight change*, *Readings in range*, *Last import* | The KPI row. A card that has a comparable earlier window shows the change against it, with the comparison spelled out for a screen reader; *All time* has no earlier window, and *Weight change* is the first reading against the last inside the range |
-| *Blood pressure* | One line each for systolic, diastolic and pulse across the window, with a legend giving each series' unit. All three share one axis, so the chart compares shape rather than absolute scale; the note above the table says so |
-| *Weight* | One bar per week, the mean of that week's weighings. A bar for a week still in progress is shaded and labelled. The four-week moving average is taken over four consecutive calendar weeks that each contain a weigh-in, so a week without a weigh-in breaks the line, which is why the bars can continue across a gap where the line stops |
-| *Body composition* | One metric at a time, chosen from *Body fat*, *Skeletal muscle*, *Visceral fat*, *Resting metabolism* and *Impedance*, so a percentage never shares an axis with a kilogram. The choice is in the URL (`?metric=`) |
-| *Consistency* | A heatmap of the last 364 days, one cell per day in four levels from none to three or more readings, with month labels. Hovering a cell gives its date and count; the table below lists the days that have readings |
-| *Readings per week* | One bar per week with the number of readings in it, the week in progress shaded |
-| *Extremes* | Highest, lowest and latest for each metric with its date and how many readings it is based on, each name linking to that metric's drill-down |
+| *Latest blood pressure*, *7-day average*, *Latest weight*, *Weight change*, *Readings in range*, *Last import* | The KPI row. Every value carries its unit and the precision the metric deserves: whole mmHg for blood pressure, one decimal for kilograms and percentages. The *7-day average* adds a sub-line, *based on N readings*, and compares the systolic 7-day mean with the mean of the last 7 days of the previous window as an absolute `+20 mmHg`-style delta; *Latest weight* and *Weight change* compare kilograms (`−0.4 kg`); *Readings in range* stays a percentage. A delta is coloured by what it means, not just by its arrow: red when the move is worse (a rise in blood pressure), green when it is better, grey when the metric carries no good or bad direction (weight, counts). The comparison is spelled out for a screen reader. *All time* has no earlier window, and *Weight change* is the first reading against the last inside the range |
+| *Blood pressure* | Two panels sharing one x axis. The first draws systolic and diastolic as lines with a dot per reading, a dashed 7-day rolling average of each, and shaded reference bands (below); readings at or above 140 systolic or 90 diastolic also get a ringed outlier dot. The second draws the pulse alone on its own `/min` scale. The card head names the latest pair and its AHA category, for example *Latest 129/73 · AHA category: Normal* |
+| *Weight* | One line of daily weigh-ins with a dot per reading, plus the dashed 7-day rolling average, which appears only once seven days of history exist in the range. The last reading gets an emphasised dot. Both lines break across gaps longer than 7 days |
+| *Body composition* | One metric at a time, chosen from *Body fat*, *Skeletal muscle*, *Visceral fat*, *Resting metabolism* and *Impedance*, so a percentage never shares an axis with a kilogram. The choice is in the URL (`?metric=`). Each metric plots against the fixed display domain in the table below; when the data falls outside it the domain widens instead of clipping the line |
+| *Consistency* | A heatmap of the last 364 days, one cell per day in four levels from none to three or more readings, with month labels. Hovering a cell gives its date and count; a visually hidden paragraph summarises the whole heatmap for a screen reader, and the table below lists the days that have readings |
+| *Readings per week* | One bar per week with the number of readings in it, the week in progress shaded. Bars keep a zero baseline, because a bar is a magnitude and every bar left on the page is a count |
+| *Extremes* | Latest, high and low for each metric, each value with its unit and its date, plus how many readings it is based on. A metric with a single reading shows only the latest, without repeating it as high and low. Each name links to that metric's drill-down |
+
+### Blood-pressure reference
+
+The shaded bands on the blood-pressure chart are the AHA/ACC 2017 categories from
+[Understanding Blood Pressure Readings](https://www.heart.org/en/health-topics/high-blood-pressure/understanding-blood-pressure-readings):
+elevated at systolic 120–129, stage 1 at 130–139 and stage 2 at 140 and above, with the
+diastolic equivalents 80/90 mmHg. A reading's category is the higher of its systolic and its
+diastolic category (a crisis is above 180 systolic or 120 diastolic), and the card head reports
+the latest reading's category on the same scale.
+
+A home blood-pressure average of 135/85 mmHg or more over seven days corresponds to an office
+reading of 140/90 mmHg under the 2017 ACC/AHA guideline
+([Whelton et al., Hypertension](https://www.ahajournals.org/doi/10.1161/HYP.0000000000000065)),
+which is the threshold the *7-day average* KPI is read against; the note under the chart says
+so.
+
+### Composition display domains
+
+These are display domains that frame the chart so ordinary variation fills the panel; they are
+not medical norms, and the domain widens when a reading falls outside it.
+
+| Metric | Domain | Why that band |
+| --- | --- | --- |
+| Body fat | 20–45 % | The band that covers lean to high adult values on the scale |
+| Skeletal muscle | 15–45 % | The band that covers low to high muscle percentages the scale reports |
+| Visceral fat | 1–20 | The low end of the device's rating scale, where the differences that matter happen |
+| Resting metabolism | 1500–2500 kcal | The typical adult basal-metabolism band |
+| Impedance | 200–600 ohm | The typical whole-body bioimpedance range at the scale's frequency |
+
+### Table caps
 
 Below each chart, *Show the numbers* expands the same data as a table, which is also what
-prints. *Print* calls the browser's print dialog; printing hides the navigation, the
-toolbar and the range chips and opens every data table, so the page prints as a report even
-in the dark theme.
+prints. The blood-pressure, weight, composition and readings-per-week tables list at most the
+200 most recent rows and say so (*Showing the 200 most recent of N …*) with a link to the full
+list: the readings page filtered to that metric for blood pressure and weight, the readings
+page for the weekly card, and the metric's own drill-down for composition. *Print* calls the
+browser's print dialog; printing hides the navigation, the toolbar and the range chips and
+opens every data table, so the page prints as a report even in the dark theme.
 
 ### The metric drill-down
 
 `/dashboards/<metric>/` follows one metric with the same range chips: a line chart of every
-reading in the window, its highest, lowest and latest value, and *Show the numbers* with the
-readings themselves, newest first, with unit and note. The table lists the 500 most recent
-and says how many are hidden beyond that; the chart is not capped. An unknown metric in the
-path is a 404, and a metric with no readings in the selected window says so and offers
-*All time*.
+reading in the window — with the same display domain as the composition card for those five
+metrics, and lines that break across gaps longer than 7 days — its highest, lowest and latest
+value with unit, and *Show the numbers* with the readings themselves, newest first, value and
+note. The table lists the 500 most recent and says how many are hidden beyond that; the chart
+is not capped. An unknown metric in the path is a 404, and a metric with no readings in the
+selected window says so and offers *All time*.
 
 ## From the command line
 

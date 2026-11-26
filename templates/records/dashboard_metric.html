@@ -60,11 +60,11 @@
       <table class="table">
         <caption class="visually-hidden">{{ metric_label }} per reading for {{ period_label }}</caption>
         <thead>
-          <tr><th scope="col">Reading</th><th scope="col" class="num">Value</th><th scope="col">Unit</th><th scope="col">Note</th></tr>
+          <tr><th scope="col">Reading</th><th scope="col" class="num">Value</th><th scope="col">Note</th></tr>
         </thead>
         <tbody>
           {% for row in rows %}
-          <tr><td>{{ row.date }}</td><td class="num">{{ row.value }}</td><td class="muted">{{ row.unit }}</td><td class="muted">{{ row.note }}</td></tr>
+          <tr><td>{{ row.date }}</td><td class="num">{{ row.value }}</td><td class="muted">{{ row.note|default:"—" }}</td></tr>
           {% endfor %}
         </tbody>
       </table>
@@ -80,17 +80,17 @@
   <ul class="record-list">
     <li class="record-row">
       <span class="record-name">Highest</span>
-      <span class="record-value">{{ extremes.high.value }} {{ unit }}</span>
+      <span class="record-value">{{ extremes.high.value }}</span>
       <span class="record-detail muted small">{{ extremes.high.date }}</span>
     </li>
     <li class="record-row">
       <span class="record-name">Lowest</span>
-      <span class="record-value">{{ extremes.low.value }} {{ unit }}</span>
+      <span class="record-value">{{ extremes.low.value }}</span>
       <span class="record-detail muted small">{{ extremes.low.date }}</span>
     </li>
     <li class="record-row">
       <span class="record-name">Latest</span>
-      <span class="record-value">{{ extremes.latest.value }} {{ unit }}</span>
+      <span class="record-value">{{ extremes.latest.value }}</span>
       <span class="record-detail muted small">{{ extremes.latest.date }}</span>
     </li>
   </ul>

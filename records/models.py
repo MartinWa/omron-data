@@ -36,6 +36,14 @@ METRICS = {
 COMPONENTS = ("systolic_bp", "diastolic_bp", "pulse")
 PANEL = "blood_pressure"
 
+REFERENCE_BANDS = {
+    "blood_pressure": [
+        {"from": 120, "to": 130, "label": "AHA elevated (systolic 120–129)", "class": "band-warn"},
+        {"from": 130, "to": 140, "label": "AHA stage 1 (130–139)", "class": "band-warn"},
+        {"from": 140, "to": None, "label": "AHA stage 2 (≥140)", "class": "band-danger"},
+    ]
+}
+
 
 class ImportRun(models.Model):
     owner = models.ForeignKey(

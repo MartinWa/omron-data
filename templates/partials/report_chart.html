@@ -16,16 +16,35 @@
     </rect>
     {% endfor %}
   </g>
-  {% if chart.has_line %}
-  {% for segment in chart.segments %}
-  <polyline class="chart-line series-1" points="{{ segment }}" fill="none"></polyline>
-  {% endfor %}
-  {% endif %}
   {% else %}
+  {% if chart.bands %}
+  <g class="chart-bands">
+    {% for band in chart.bands %}
+    <rect class="chart-band {{ band.class }}" x="{{ chart.left }}" y="{{ band.y }}" width="{{ chart.plot_width }}" height="{{ band.height }}">
+      <title>{{ band.label }}</title>
+    </rect>
+    {% endfor %}
+  </g>
+  {% endif %}
   <g class="chart-lines">
     {% for line in chart.lines %}
-    <polyline class="chart-line {{ line.class }}" points="{{ line.points }}" fill="none"></polyline>
-    {% for dot in line.dots %}<circle class="chart-dot {{ line.class }}" cx="{{ dot.x }}" cy="{{ dot.y }}" r="3"></circle>{% endfor %}
+    {% for segment in line.segments %}
+    <polyline class="chart-line {{ line.class }}" points="{{ segment }}" fill="none"></polyline>
+    {% endfor %}
+    {% for dot in line.dots %}
+    {% if "series-3" in line.class %}
+    <polygon class="chart-dot {{ line.class }}{% if dot.class %} {{ dot.class }}{% endif %}" points="{{ dot.points }}">{% if dot.title %}<title>{{ dot.title }}</title>{% endif %}</polygon>
+    {% elif "series-2" in line.class %}
+    <rect class="chart-dot {{ line.class }}{% if dot.class %} {{ dot.class }}{% endif %}" x="{{ dot.x }}" y="{{ dot.y }}" width="{{ dot.width }}" height="{{ dot.height }}">{% if dot.title %}<title>{{ dot.title }}</title>{% endif %}</rect>
+    {% else %}
+    <circle class="chart-dot {{ line.class }}{% if dot.class %} {{ dot.class }}{% endif %}" cx="{{ dot.x }}" cy="{{ dot.y }}" r="3">{% if dot.title %}<title>{{ dot.title }}</title>{% endif %}</circle>
+    {% endif %}
+    {% endfor %}
+    {% for mark in line.marks %}
+    <circle class="chart-dot {{ mark.class }} outlier" cx="{{ mark.x }}" cy="{{ mark.y }}" r="4">
+      <title>{{ mark.title }}</title>
+    </circle>
+    {% endfor %}
     {% endfor %}
   </g>
   {% endif %}

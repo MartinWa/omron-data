@@ -8,7 +8,7 @@
 <div class="page-head report-head">
   <h1>Dashboards</h1>
   {% if has_data %}
-  <p class="lede">{{ period_label }} · {{ readings_total }} reading{{ readings_total|pluralize }}{% if last_import %} · last import {{ last_import|isodate }}{% endif %}</p>
+  <p class="lede">{{ period_label }} · {{ readings_total }} reading{{ readings_total|pluralize }}{% if last_reading_days is not None %} · last reading {% if last_reading_days == 0 %}today{% else %}{{ last_reading_days }} day{{ last_reading_days|pluralize }} ago{% endif %}{% endif %}{% if last_import %} · last import {{ last_import|isodate }}{% endif %}</p>
   {% else %}
   <p class="lede">Blood pressure, weight, body composition and consistency from your imported readings.</p>
   {% endif %}
@@ -47,8 +47,11 @@
   <div class="stat">
     <span class="stat-label">{{ card.label }}</span>
     <span class="stat-value">{{ card.value }}</span>
+    {% if card.sub %}
+    <span class="stat-sub muted small">{{ card.sub }}</span>
+    {% endif %}
     {% if card.delta %}
-    <span class="delta delta-{{ card.delta.class }}">
+    <span class="delta delta-{{ card.delta.tone }}">
       <span aria-hidden="true">{{ card.delta.text }}</span>
       <span class="visually-hidden">{{ card.delta.aria }}</span>
     </span>
@@ -60,7 +63,11 @@
 <section class="card report-card">
   <div class="card-head">
     <h2>Blood pressure</h2>
-    <span class="muted small">Systolic, diastolic and pulse</span>
+    {% if blood_pressure.latest %}
+    <span class="muted small">Latest {{ blood_pressure.latest }} · AHA category: <span class="{{ blood_pressure.category.class }}">{{ blood_pressure.category.text }}</span></span>
+    {% else %}
+    <span class="muted small">Systolic and diastolic</span>
+    {% endif %}
   </div>
   {% if blood_pressure.has_points %}
   <div class="chart-wrap">
@@ -71,18 +78,29 @@
     <li><span class="legend-swatch {{ line.class }}"></span>{{ line.label }} ({{ line.unit }})</li>
     {% endfor %}
   </ul>
-  <p class="chart-note">All three series share one axis: mmHg for systolic and diastolic, beats per minute for pulse.</p>
+  <p class="chart-note">Shaded bands are the AHA/ACC 2017 systolic categories (diastolic equivalents 80/90 mmHg). A home 7-day average of 135/85 mmHg or higher corresponds to an office reading of 140/90 mmHg.</p>
+  <div class="chart-wrap">
+    {% include "partials/report_chart.html" with chart=blood_pressure.pulse_chart %}
+  </div>
+  <ul class="chart-legend">
+    {% for line in blood_pressure.pulse_legend %}
+    <li><span class="legend-swatch {{ line.class }}"></span>{{ line.label }} ({{ line.unit }})</li>
+    {% endfor %}
+  </ul>
   <details class="data-table" data-print-open>
     <summary>Show the numbers</summary>
+    {% if blood_pressure.rows_total > blood_pressure.rows|length %}
+    <p class="small muted">Showing the {{ blood_pressure.rows|length }} most recent of {{ blood_pressure.rows_total }} readings. <a href="{{ blood_pressure.rows_url }}">All blood-pressure readings</a></p>
+    {% endif %}
     <div class="table-wrap">
       <table class="table">
         <caption class="visually-hidden">Systolic, diastolic and pulse per reading for {{ period_label }}</caption>
         <thead>
-          <tr><th scope="col">Reading</th><th scope="col" class="num">Systolic</th><th scope="col" class="num">Diastolic</th><th scope="col" class="num">Pulse</th></tr>
+          <tr><th scope="col">Reading</th><th scope="col" class="num">Systolic</th><th scope="col" class="num">Diastolic</th><th scope="col" class="num">Pulse</th><th scope="col">Note</th></tr>
         </thead>
         <tbody>
           {% for row in blood_pressure.rows %}
-          <tr><td>{{ row.date }}</td><td class="num">{{ row.systolic }}</td><td class="num">{{ row.diastolic }}</td><td class="num">{{ row.pulse }}</td></tr>
+          <tr><td>{{ row.date }}</td><td class="num">{{ row.systolic }}</td><td class="num">{{ row.diastolic }}</td><td class="num">{{ row.pulse }}</td><td class="muted">{{ row.note|default:"—" }}</td></tr>
           {% endfor %}
         </tbody>
       </table>
@@ -97,26 +115,27 @@
   <section class="card report-card">
     <div class="card-head">
       <h2>Weight</h2>
-      <span class="muted small">Weekly mean</span>
+      <span class="muted small">Daily readings</span>
     </div>
     {% if weight.has_points %}
     <div class="chart-wrap">
       {% include "partials/report_chart.html" with chart=weight.chart %}
     </div>
-    {% if weight.has_line %}
-    <p class="chart-note">Line: {{ weight.window }}-week moving average. Shaded bar: a week still in progress.</p>
-    {% endif %}
+    <p class="chart-note">Line: 7-day rolling average. The line breaks across gaps longer than 7 days.</p>
     <details class="data-table" data-print-open>
       <summary>Show the numbers</summary>
+      {% if weight.rows_total > weight.rows|length %}
+      <p class="small muted">Showing the {{ weight.rows|length }} most recent of {{ weight.rows_total }} readings. <a href="{{ weight.rows_url }}">All weight readings</a></p>
+      {% endif %}
       <div class="table-wrap">
         <table class="table">
-          <caption class="visually-hidden">Weight per week for {{ period_label }}</caption>
+          <caption class="visually-hidden">Daily weight and 7-day average for {{ period_label }}</caption>
           <thead>
-            <tr><th scope="col">Period</th><th scope="col" class="num">Weight</th><th scope="col">Note</th></tr>
+            <tr><th scope="col">Reading</th><th scope="col" class="num">Weight</th><th scope="col" class="num">7-day average</th><th scope="col">Note</th></tr>
           </thead>
           <tbody>
             {% for row in weight.rows %}
-            <tr><td>{{ row.date }}</td><td class="num">{{ row.text }}</td><td class="muted">{{ row.note|default:"—" }}</td></tr>
+            <tr><td>{{ row.date }}</td><td class="num">{{ row.value }}</td><td class="num">{{ row.average }}</td><td class="muted">{{ row.note|default:"—" }}</td></tr>
             {% endfor %}
           </tbody>
         </table>
@@ -143,15 +162,18 @@
     <p class="chart-note">{{ composition.label }} only, so a percentage never shares an axis with a kilogram.</p>
     <details class="data-table" data-print-open>
       <summary>Show the numbers</summary>
+      {% if composition.rows_total > composition.rows|length %}
+      <p class="small muted">Showing the {{ composition.rows|length }} most recent of {{ composition.rows_total }} readings. <a href="{{ composition.rows_url }}">All {{ composition.label|lower }} readings</a></p>
+      {% endif %}
       <div class="table-wrap">
         <table class="table">
           <caption class="visually-hidden">{{ composition.label }} per reading for {{ period_label }}</caption>
           <thead>
-            <tr><th scope="col">Reading</th><th scope="col" class="num">{{ composition.label }} ({{ composition.unit|default:"no unit" }})</th><th scope="col">Note</th></tr>
+            <tr><th scope="col">Reading</th><th scope="col" class="num">{{ composition.label }} ({{ composition.unit|axis_unit|default:"no unit" }})</th><th scope="col">Note</th></tr>
           </thead>
           <tbody>
             {% for row in composition.rows %}
-            <tr><td>{{ row.date }}</td><td class="num">{{ row.value }}</td><td class="muted">{{ row.note }}</td></tr>
+            <tr><td>{{ row.date }}</td><td class="num">{{ row.value }}</td><td class="muted">{{ row.note|default:"—" }}</td></tr>
             {% endfor %}
           </tbody>
         </table>
@@ -169,6 +191,7 @@
       <h2>Consistency</h2>
       <span class="muted small">{{ consistency.days }} day{{ consistency.days|pluralize }} with readings</span>
     </div>
+    <p class="visually-hidden">Heatmap of {{ consistency.window_label }}: {{ consistency.days }} days with readings, {{ consistency.readings }} readings in total. The table below lists each day.</p>
     <div class="heatmap-scroll" tabindex="0" role="group" aria-label="Readings per day for the last year">
       <div class="heatmap">
         <div class="heatmap-months" aria-hidden="true">
@@ -224,6 +247,9 @@
     <p class="chart-note">Shaded bar: a week still in progress.</p>
     <details class="data-table" data-print-open>
       <summary>Show the numbers</summary>
+      {% if weekly.rows_total > weekly.rows|length %}
+      <p class="small muted">Showing the {{ weekly.rows|length }} most recent of {{ weekly.rows_total }} weeks. <a href="{{ weekly.rows_url }}">All readings</a></p>
+      {% endif %}
       <div class="table-wrap">
         <table class="table">
           <caption class="visually-hidden">Readings per week for {{ period_label }}</caption>
@@ -253,9 +279,13 @@
   <ul class="record-list">
     {% for row in extremes %}
     <li class="record-row">
-      <a class="record-name" href="{{ row.url }}">{{ row.label }}</a>
-      <span class="record-value">{{ row.latest.value }} {{ row.unit }}</span>
-      <span class="record-detail muted small">High {{ row.high.value }} on {{ row.high.date }} · Low {{ row.low.value }} on {{ row.low.date }} · Latest on {{ row.latest.date }} · {{ row.count }} reading{{ row.count|pluralize }}</span>
+      <a class="record-name" href="{{ row.url }}">{{ row.label }}</a>{% if row.unit %}<span class="muted small">{{ row.unit|axis_unit }}</span>{% endif %}
+      <span class="record-value">{{ row.latest.value }}</span>
+      {% if row.count == 1 %}
+      <span class="record-detail muted small">Latest on {{ row.latest.date }} · {{ row.count }} reading</span>
+      {% else %}
+      <span class="record-detail muted small">Latest on {{ row.latest.date }} · High {{ row.high.value }} on {{ row.high.date }} · Low {{ row.low.value }} on {{ row.low.date }} · {{ row.count }} reading{{ row.count|pluralize }}</span>
+      {% endif %}
     </li>
     {% endfor %}
   </ul>

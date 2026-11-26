@@ -15,7 +15,7 @@ from django.urls import reverse
 
 from omron_data.context_processors import REPOSITORY_URL
 from records.templatetags.assets import asset
-from records.templatetags.formatting import elided_pages, isodate, isominute, num
+from records.templatetags.formatting import axis_unit, elided_pages, isodate, isominute, num
 
 TEMPLATES = Path(settings.BASE_DIR) / "templates"
 APP_CSS = Path(finders.find("records/app.css"))
@@ -218,6 +218,15 @@ def test_num_groups_thousands_and_honours_the_asked_for_decimals():
     assert num(Decimal("1234.5"), 2) == "1,234.50"
     assert num(Decimal("0.005"), 2) == "0.01"
     assert num(Decimal("100")) == "100"
+
+
+def test_axis_unit_keeps_the_percent_tight_and_spaces_every_other_unit():
+    assert axis_unit("") == ""
+    assert axis_unit(None) == ""
+    assert axis_unit("%") == "%"
+    assert axis_unit("kg") == " kg"
+    assert axis_unit("mmHg") == " mmHg"
+    assert axis_unit("/min") == " /min"
 
 
 def test_isodate_renders_the_day_or_the_minute_and_passes_other_values_through():

@@ -108,37 +108,74 @@ points into **one dict** and `templates/partials/report_chart.html` renders that
 page computes a coordinate, and no template does arithmetic.
 
 - `bar_chart(points, ...)` and `line_chart(lines, ...)` return the same frame: `kind`,
-  `width`, `height`, `left`, `right`, `top`, `bottom`, `plot_bottom`, `right_edge`, `ticks`,
-  `xlabels`, `aria_label` and `empty`, plus `bars` or `lines`. The frame is a 720 × 240
-  viewBox with three labelled y ticks.
+  `width`, `height`, `left`, `right`, `top`, `bottom`, `plot_bottom`, `plot_width`,
+  `right_edge`, `ticks`, `xlabels`, `aria_label` and `empty`, plus `bars` for a bar chart.
+  A line chart's frame also carries `y_min`, `y_max` (the resolved domain), `max_gap`,
+  `bands` and `lines`; every line carries `label`, `class`, `segments`, `dots` and `marks`.
+  The frame is a 720 × 240 viewBox with three labelled y ticks.
+- **Units are raw in Python and spaced once in the template layer.** `bar_chart` and
+  `line_chart` take the raw unit (`"kg"`, `"%"`, `"mmHg"`), `_tick_label` appends it through
+  the `axis_unit` filter in `records/templatetags/formatting.py` — `%` stays tight, every
+  other unit gets one leading space, an empty unit stays empty — and the same filter is used
+  in the markup wherever a unit follows a value. `_metric_value_text(unit, value)` in
+  `reports.py` formats a value with the per-unit precision map (`mmHg` 0, `kg` 1, `%` 1,
+  `°C` 1) plus that unit, and is what extremes, KPI texts and table rows use, so a rendered
+  number never shows raw float precision.
+- **Domains.** A bar chart keeps a zero baseline, because every bar left on the page is a
+  count and a bar is a magnitude from zero. A line chart derives its domain from the data —
+  `lo = min(values + [y_min])`, `hi = max(values + [y_max])` — and `nice_domain` pads it
+  outward to a round step (`nice_step` over 1, 2, 2.5, 5, 10 × 10^e) with an even number of
+  steps, so the three ticks land at `y_min`, the middle and `y_max`, all multiples of the
+  step. A truncated line axis is legitimate when the story is change over time, so both end
+  ticks stay on the chart and the numbers stay behind *Show the numbers*; a flat series gets
+  a span of `max(abs(value) * 0.1, 1.0)` so the domain never degenerates.
+- **Segments, dots, marks and bands.** A line splits into `segments` wherever consecutive x
+  differ by more than `max_gap` (x is days from the range start) or a y is `None`; a
+  single-point segment still produces a dot. `dots_all` on a line draws a dot per point, and
+  the dot's shape follows the series index — `series-1` a circle, `series-2` a rect,
+  `series-3` a polygon — so colour-vision-deficient readers can tell the series apart by shape
+  as well as hue, and the line styles differ by dash pattern (`series-2` dashed, `series-3`
+  dotted, an `avg` line dashed thinner). A line may carry `marks` — outlier readings —
+  rendered as `chart-dot … outlier` circles with a `<title>`, and `latest_title` emphasises
+  the last dot as `dot-latest`. `bands` is a list of `{"from", "to", "label", "class"}`
+  (`to=None` means to the domain top); each is clamped to the domain and projected to
+  `{"y", "height", "class", "label"}` and emitted in `chart["bands"]`, which the partial
+  renders *before* the lines. The blood-pressure bands are data in
+  `records/models.py` (`REFERENCE_BANDS`), never hex in Python.
 - Geometry is pure Python and stays finite: coordinates are rounded to two decimals, and a
-  non-finite or missing value plots as `0` rather than `nan`. The axis maximum comes from
-  `nice_max`, which snaps to 1, 2, 4, 5 or 10 times a power of ten, so a small history still
-  gets a readable axis.
+  non-finite or missing value plots as `0` rather than `nan`.
 - A bucket that only partly overlaps the range is flagged in the dict (`partial`,
   `in_progress`) together with a note, and the partial renders it as `bar-partial`; the note
   becomes the bar's `<title>`, which is how a partial period is explained without a legend.
+- **Tick labels omit the year** unless the range crosses a year boundary and the tick lands in
+  January (`multi_year` on `_day_ticks` and `_tick_bucket_label`); full dates with the year
+  stay in tooltips and tables.
 - **Colours come from CSS only.** Neither the Python nor the partial writes a colour: the
   only paint attribute is `fill="none"` on a polyline. The partial emits classes
-  (`chart-bar`, `bar-partial`, `chart-line`, `series-1` to `series-3`, `chart-dot`) and the
-  palette lives in `records/static/records/app.css`, so both themes and the print
-  stylesheet get a readable chart for free.
-- The SVG carries `role="img"`, a non-empty `aria-label` and a `<title>` per bar, so a
-  screen reader and a printed page get the numbers even without hover.
+  (`chart-bar`, `bar-partial`, `chart-band band-warn`/`band-danger`, `chart-line`,
+  `series-1` to `series-3`, `avg`, `chart-dot`, `outlier`, `dot-latest`) and the palette
+  lives in `records/static/records/app.css`, so both themes and the print stylesheet get a
+  readable chart for free.
+- The SVG carries `role="img"`, a non-empty `aria-label` and a `<title>` per bar, band, dot
+  and mark, so a screen reader and a printed page get the numbers even without hover.
 - The card builders (`_blood_pressure_card`, `_weight_card`, `_composition_card`,
   `_consistency_card`, `_weekly_card`, `_extremes_card`) sit on top of those two functions
-  and return the card's `chart` dict plus its `rows` for the table behind *Show the
-  numbers*. `build_dashboards(owner, params, today)` and
+  and return the card's `chart` dict plus its `rows` for the table behind *Show the numbers*,
+  capped at `CARD_ROW_LIMIT` most recent rows with a `rows_total` and a `rows_url` for the
+  full list. `build_dashboards(owner, params, today)` and
   `build_metric_dashboard(owner, metric, params, today)` assemble the whole page context
   without a request object, so a page test and a shell check can call them directly.
 
 `tests/test_reports.py` renders the partial with `render_to_string` and asserts the key set,
-the finite coordinates, that one point still draws a marker, and that no `nan`, `inf` or
-`None` reaches the markup. `tests/test_dashboards.py` covers the page: the range chips and
-their default, the six KPI numbers, one metric at a time in the composition card, the
-heatmap grid, every SVG carrying a role and a label, that no markup carries a literal colour
-or a `#hex`, that the drill-down is a 404 for an unknown metric, and that the page stays
-under forty queries.
+the finite coordinates, the domain rules (a 131–132 kg series stays inside 126–136, a flat
+series keeps its height, a single point still draws a dot, gap splitting, band clamping), and
+that no `nan`, `inf` or `None` reaches the markup. `tests/test_dashboards.py` covers the page:
+the range chips and their default, the six KPI numbers and their units, the two blood-pressure
+panels with the reference bands and the latest category, the weight line with its 7-day
+average, one metric at a time in the composition card with its domain, the table caps, the
+heatmap grid and its hidden summary, every SVG carrying a role and a label, that no markup
+carries a literal colour, a `#hex` or a raw float, that the drill-down is a 404 for an unknown
+metric, and that the page stays under forty queries.
 
 ## The opt-in parity check
 
