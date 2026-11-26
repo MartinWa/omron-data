@@ -212,10 +212,16 @@ OMRON_TRUSTED_PROXY=*
 OMRON_TRUSTED_PROXY=172.20.0.4
 ```
 
+The address is compared as an exact peer address, with no wildcards and no CIDR ranges. A
+proxy on the host that reaches a published port is seen as the Docker bridge gateway, not as
+the proxy's own address, so that setup takes `*` rather than a named peer.
+
 Only the last hop is read (`trusted_proxy_count` is 1), so a client cannot forge the scheme
 by sending its own header past the proxy. `OMRON_CSRF_TRUSTED_ORIGINS` stays empty for the
 usual single-host setup: once the scheme is right, the browser's own origin matches the
-request and no extra origin list is needed.
+request and no extra origin list is needed. The header is only trusted by the server the
+image starts: a working copy served with plain `waitress-serve` ignores the setting, so run
+`uv run python -m tools.serve` there instead.
 
 The upstream below is `web:8000` for a proxy in a shared Docker network; use
 `http://127.0.0.1:8000` for a proxy on the host:
@@ -254,7 +260,7 @@ to `staticfiles/` unless `OMRON_STATIC_ROOT` says otherwise:
 
 ```sh
 uv run python manage.py collectstatic --noinput
-uv run waitress-serve --port 8000 omron_data.wsgi:application
+uv run python -m tools.serve
 ```
 
 Without it the pages render unstyled, because the stylesheet is not where the server looks
@@ -276,6 +282,11 @@ docker compose up -d --pull always
 `latest`. Migrations run automatically on start. To roll back, point `OMRON_IMAGE` back to
 the previous tag and restore the database backup together, because a newer schema may
 already have been applied.
+
+Staged uploads written before this version carry no `.omron-data-pending` marker file, and
+cleanup only deletes folders it can prove it created. After upgrading, remove the leftover
+subdirectories of `omron-data-pending/` — inside `OMRON_PENDING_DIR`, or the system temp
+directory when that is unset — that hold no marker file. Nothing else needs attention.
 
 ## Ownership
 

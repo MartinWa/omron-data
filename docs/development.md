@@ -45,16 +45,17 @@ Three more worth running before a pull request or a release, all runnable the sa
 | `uv run python tools/check_no_private_data.py` | That the working tree carries no private data |
 
 To run the app from a working copy, collect the static files first and then serve it with
-waitress, which is what the image's entry point uses:
+the same entry point the image uses:
 
 ```sh
 uv run python manage.py collectstatic --noinput
-uv run waitress-serve --port 8000 omron_data.wsgi:application
+uv run python -m tools.serve
 ```
 
-`uv run python -m tools.serve` does the same through the image's own entry point: it
-verifies the data directory, applies migrations and serves on `OMRON_PORT` (8000) with
-`OMRON_THREADS` workers (8).
+That verifies the data directory, applies migrations and serves on `OMRON_PORT` (8000) with
+`OMRON_THREADS` workers (8). It also honours `OMRON_TRUSTED_PROXY`, which plain
+`waitress-serve` cannot: served that way, a proxy's `X-Forwarded-Proto` is discarded and
+browser `POST`s fail the CSRF origin check.
 
 ## Container development
 

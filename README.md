@@ -113,7 +113,7 @@ uv run python manage.py migrate
 uv run python manage.py import_omron /path/to/exports --owner alice --create-user --dry-run
 uv run python manage.py make_token --owner alice --name laptop
 uv run python manage.py collectstatic --noinput
-uv run waitress-serve --port 8000 omron_data.wsgi:application
+uv run python -m tools.serve
 ```
 
 `collectstatic` is what puts the stylesheet and the scripts where the server looks for them:
