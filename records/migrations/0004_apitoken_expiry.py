@@ -9,7 +9,7 @@ def mark_revoked_tokens(apps, schema_editor):
 
 def restore_revoked_tokens(apps, schema_editor):
     ApiToken = apps.get_model("records", "ApiToken")
-    ApiToken.objects.filter(revoked_at__isnull=False).update(revoked=True)
+    ApiToken.objects.exclude(revoked_at__isnull=True, expires_at__isnull=True).update(revoked=True)
 
 
 class Migration(migrations.Migration):

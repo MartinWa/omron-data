@@ -345,7 +345,7 @@ METRIC_LABELS = {
     "resting_metabolism": "Resting metabolism",
     "impedance": "Impedance",
     "fat_mass": "Fat mass",
-    "average_weight_change": "Average weight change",
+    "average_weight_reported": "Average weight as reported",
     "average_fat_mass": "Average fat mass",
     "body_temperature": "Body temperature",
 }

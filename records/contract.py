@@ -3,7 +3,7 @@ from datetime import UTC, datetime
 
 from django.http import HttpResponse
 
-CONTRACT_VERSION = "1.0"
+CONTRACT_VERSION = "2.0"
 API_PREFIX = "/api/v1/"
 MAX_LIMIT = 1000
 DEFAULT_LIMIT = 100

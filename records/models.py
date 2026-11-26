@@ -27,7 +27,7 @@ METRICS = {
         Metric("resting_metabolism", "kcal"),
         Metric("impedance", "ohm"),
         Metric("fat_mass", "kg"),
-        Metric("average_weight_change", "kg"),
+        Metric("average_weight_reported", "kg"),
         Metric("average_fat_mass", "kg"),
         Metric("body_temperature", "°C"),
     )

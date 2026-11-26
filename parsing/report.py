@@ -90,7 +90,7 @@ ALIASES: dict[str, tuple[str, ...]] = {
     "body_temperature": ("Temperatur ()", "Temperatur (°C)"),
     "body_weight": ("Vikt (kg)",),
     "body_weight_lb": ("Vikt (lbs)",),
-    "average_weight_change": ("Genomsnittlig vikt (kg)",),
+    "average_weight_reported": ("Genomsnittlig vikt (kg)",),
     "average_fat_mass": ("Genomsnittlig fettfri massa (kg)",),
     "bmi": ("BMI",),
     "body_fat_pct": ("Kroppsfett (%)", "Kroppsfett–procent"),

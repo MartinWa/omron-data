@@ -37,4 +37,4 @@ class Command(BaseCommand):
         key = issue(owner, options["name"], expires_at=expires_at)
         self.stdout.write(f"{options['name']}: {key}")
         if expires_at is not None:
-            self.stdout.write(f"expires {expires_at:%Y-%m-%d}")
+            self.stdout.write(f"expires {timezone.localtime(expires_at):%Y-%m-%d}")

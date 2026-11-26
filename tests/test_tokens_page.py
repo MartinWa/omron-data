@@ -213,7 +213,7 @@ def test_a_token_can_be_created_with_an_expiry(client, alice):
     left = token.expires_at - timezone.now()
     assert timedelta(days=29, hours=23) < left < timedelta(days=30, minutes=1)
     content = response.content.decode()
-    assert token.expires_at.strftime("%Y-%m-%d") in content
+    assert timezone.localtime(token.expires_at).strftime("%Y-%m-%d") in content
     assert '<span class="badge badge-success">active</span>' in content
 
 
@@ -261,7 +261,7 @@ def test_make_token_can_set_an_expiry():
 
     token = ApiToken.objects.get(owner=owner, name="laptop")
     assert token.expires_at is not None
-    assert token.expires_at.strftime("%Y-%m-%d") in out.getvalue()
+    assert timezone.localtime(token.expires_at).strftime("%Y-%m-%d") in out.getvalue()
 
 
 @pytest.mark.django_db

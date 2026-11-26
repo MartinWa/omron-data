@@ -99,7 +99,7 @@ def test_summary_section_metrics():
 def test_detail_section_metrics():
     assert metrics(DETAIL) == {
         "body_weight",
-        "average_weight_change",
+        "average_weight_reported",
         "bmi",
         "body_fat_pct",
         "skeletal_muscle_pct",
@@ -380,5 +380,5 @@ def test_body_temperature_and_water_are_stored():
 def test_average_metrics_are_stored():
     found = values(DETAIL)
 
-    assert found["average_weight_change"] == Decimal("82.3")
+    assert found["average_weight_reported"] == Decimal("82.3")
     assert found["average_fat_mass"] == Decimal("64.9")
