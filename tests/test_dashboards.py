@@ -133,6 +133,19 @@ def delta_blocks(body: str) -> list[tuple[str, str, str]]:
     return [match.groups() for match in DELTA.finditer(body)]
 
 
+def weigh_ins(owner, today: date, offsets: list[int]) -> None:
+    Measurement.objects.bulk_create(
+        [
+            measurement(owner, "body_weight", moment(today - timedelta(days=offset)), 72.0)
+            for offset in offsets
+        ]
+    )
+
+
+def centre(bar) -> float:
+    return bar["x"] + bar["width"] / 2
+
+
 @pytest.mark.django_db
 def test_the_first_visit_sends_anonymous_visitors_to_the_login_page(client):
     response = client.get(reverse("dashboards"))
@@ -392,6 +405,53 @@ def test_the_weight_card_shades_the_week_in_progress(signed_in):
     assert response.context["weight"]["has_line"] is True
 
 
+def test_weigh_ins_a_month_apart_never_draw_a_moving_average_line(client, db):
+    user = get_user_model().objects.create_user(username="monthly")
+    weigh_ins(user, timezone.localdate(), [30 * step for step in range(6, -1, -1)])
+    client.force_login(user)
+
+    response = client.get(reverse("dashboards"), {"range": "all"})
+    weight = response.context["weight"]
+    body = content_of(response)
+
+    assert len(weight["chart"]["bars"]) == 7
+    assert weight["has_points"] is True
+    assert weight["chart"]["line"] == ""
+    assert weight["chart"]["has_line"] is False
+    assert weight["has_line"] is False
+    assert "4-week moving average" not in body
+
+
+@pytest.mark.django_db
+def test_eight_consecutive_weekly_weigh_ins_start_the_line_at_the_fourth_week(client, db):
+    user = get_user_model().objects.create_user(username="weekly")
+    weigh_ins(user, timezone.localdate(), [7 * step for step in range(7, -1, -1)])
+    client.force_login(user)
+
+    chart = client.get(reverse("dashboards"), {"range": "all"}).context["weight"]["chart"]
+    vertices = chart["line"].split()
+
+    assert len(chart["bars"]) == 8
+    assert len(vertices) == 5
+    assert float(vertices[0].split(",")[0]) == pytest.approx(centre(chart["bars"][3]), abs=0.05)
+
+
+@pytest.mark.django_db
+def test_one_missing_week_breaks_the_line_until_four_weeks_follow_it(client, db):
+    user = get_user_model().objects.create_user(username="gap")
+    weigh_ins(user, timezone.localdate(), [7 * (11 - week) for week in range(12) if week != 6])
+    client.force_login(user)
+
+    chart = client.get(reverse("dashboards"), {"range": "all"}).context["weight"]["chart"]
+    xs = [float(vertex.split(",")[0]) for vertex in chart["line"].split()]
+
+    assert len(chart["bars"]) == 11
+    assert len(xs) == 5
+    assert xs[2] == pytest.approx(centre(chart["bars"][5]), abs=0.05)
+    assert xs[3] == pytest.approx(centre(chart["bars"][9]), abs=0.05)
+
+
+@pytest.mark.django_db
 def test_the_metric_switch_draws_one_metric_at_a_time(signed_in):
     for metric in ("body_fat_pct", "resting_metabolism"):
         response = signed_in.get(reverse("dashboards"), {"metric": metric})

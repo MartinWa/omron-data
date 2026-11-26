@@ -705,31 +705,33 @@ def _blood_pressure_card(series, resolved):
     return {"chart": chart, "legend": legend, "rows": rows, "has_points": bool(rows)}
 
 
+def _weekly_average(weekly, week):
+    window = [week - timedelta(days=SEVEN_DAYS * step) for step in range(MOVING_AVERAGE_WEEKS)]
+    if any(monday not in weekly for monday in window):
+        return None
+    return round(sum(weekly[monday] for monday in window) / MOVING_AVERAGE_WEEKS, 2)
+
+
 def _weight_card(series, resolved):
     start = resolved["start"]
     end = resolved["end"]
     buckets = {}
     for point in _in_window(series.get("body_weight", []), start, end):
         buckets.setdefault(_week_start(point["date"]), []).append(point["value"])
+    weekly = {week: round(sum(values) / len(values), 2) for week, values in buckets.items()}
     points = []
     for week in sorted(buckets):
         info = resolved["partial"].get(week, {})
-        values = buckets[week]
         points.append(
             {
                 "date": week,
-                "value": round(sum(values) / len(values), 2),
-                "moving_average": None,
+                "value": weekly[week],
+                "moving_average": _weekly_average(weekly, week),
                 "partial": info.get("partial", False),
                 "in_progress": info.get("in_progress", False),
                 "note": info.get("note", ""),
             }
         )
-    for index, point in enumerate(points):
-        if index + 1 >= MOVING_AVERAGE_WEEKS:
-            window = points[index - MOVING_AVERAGE_WEEKS + 1 : index + 1]
-            total = sum(item["value"] for item in window)
-            point["moving_average"] = round(total / len(window), 2)
     chart = bar_chart(
         points,
         unit=" kg",
