@@ -56,6 +56,12 @@ ENV OMRON_VERSION=${OMRON_VERSION} \
     OMRON_DB_PATH=/app/data/omron.sqlite3 \
     OMRON_STATIC_ROOT=/app/staticfiles
 COPY --from=dependencies /opt/venv /opt/venv
+# The venv carries every runtime dependency; pip only adds its vendored
+# libraries (msgpack, urllib3, pkg_resources) to the vulnerability scan.
+RUN rm -rf /usr/local/lib/python3.*/site-packages/pip \
+    /usr/local/lib/python3.*/site-packages/pip-*.dist-info \
+    /usr/local/lib/python3.*/ensurepip \
+    /usr/local/bin/pip*
 RUN mkdir -p /app/data && chown 1000:1000 /app/data
 COPY manage.py /app/manage.py
 COPY omron_data /app/omron_data
