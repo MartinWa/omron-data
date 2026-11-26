@@ -95,10 +95,17 @@ UID and GID the container runs as, or the app cannot create the database:
 mkdir -p data
 sudo chown -R 1000:1000 data
 cp .env.example .env
-# edit .env: OMRON_SECRET_KEY, OMRON_ALLOWED_HOSTS, and OMRON_TIME_ZONE if you are not in Stockholm
+# edit .env: OMRON_SECRET_KEY, OMRON_ALLOWED_HOSTS, OMRON_TRUSTED_PROXY,
+#            and OMRON_TIME_ZONE if you are not in Stockholm
 docker compose up -d
 docker compose logs -f web
 ```
+
+`OMRON_TRUSTED_PROXY` is required behind the proxy, not optional: waitress discards
+`X-Forwarded-Proto` and `X-Forwarded-For` unless the peer is named, the app then sees
+`http`, and every browser login fails the CSRF origin check with no other symptom. Set `*`
+for a proxy on the host or on a private network, or the proxy container's address when it
+sits on the `omron-data` network. See [Proxy headers](#proxy-headers).
 
 If the data directory is not writable, startup stops with an error that names the
 directory and the `chown` that fixes it, before anything else is attempted. On each start
@@ -208,7 +215,7 @@ you will see "CSRF verification failed" after every login attempt:
 # any peer may set the header: right for a proxy on a private Docker network
 OMRON_TRUSTED_PROXY=*
 
-# or name the proxy's address, which is stricter when the port is published
+# or name the proxy's address, when the proxy is a container on the same network
 OMRON_TRUSTED_PROXY=172.20.0.4
 ```
 

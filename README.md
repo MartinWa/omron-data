@@ -34,9 +34,14 @@ TLS-terminating reverse proxy.
 
 ```sh
 mkdir -p data && sudo chown -R 1000:1000 data
-cp .env.example .env       # set OMRON_SECRET_KEY and OMRON_ALLOWED_HOSTS
+cp .env.example .env       # set OMRON_SECRET_KEY, OMRON_ALLOWED_HOSTS and OMRON_TRUSTED_PROXY
 docker compose up -d
 ```
+
+`OMRON_TRUSTED_PROXY` is not optional in this recipe: waitress discards `X-Forwarded-Proto`
+from a peer it was not told to trust, so with it empty the app sees `http`, every browser
+login fails the CSRF origin check, and nothing says why. Use `*` for a proxy on the private
+network, or name the proxy's address.
 
 Then attach your proxy to the `omron-data` network, forward it to `web:8000`,
 [create the first account](docs/deployment.md#accounts-and-tokens) and log in.
