@@ -1,0 +1,191 @@
+name: Release image
+
+on:
+  push:
+    tags: ["[0-9]*.[0-9]*.[0-9]*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-image
+  cancel-in-progress: false
+
+env:
+  IMAGE: ghcr.io/martinwa/omron-data
+  DOCKER_BUILD_RECORD_UPLOAD: "false"
+
+jobs:
+  publish:
+    name: Publish the release image
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      contents: read # Tags only: the version comes from the tag and no release is written.
+      packages: write # Push the image, its index and the attestations to GHCR.
+      id-token: write # Sign the provenance and SBOM attestations.
+      attestations: write # Store the attestations for the published image.
+    env:
+      # The Git tag is the release version; pyproject.toml is never consulted.
+      RELEASE_TAG: ${{ github.ref_name }}
+    steps:
+      - name: Check out the release commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Read the version from the tag
+        id: version
+        run: |
+          if [[ ! "$RELEASE_TAG" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::The tag '$RELEASE_TAG' is not a release version of the form 1.2.3."
+            exit 1
+          fi
+          printf 'version=%s\n' "$RELEASE_TAG" >> "$GITHUB_OUTPUT"
+          printf 'Releasing version %s from %s\n' "$RELEASE_TAG" "$GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - name: Enable arm64 emulation
+        uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
+        with:
+          platforms: arm64
+      - name: Log in to GHCR
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - name: Refuse to overwrite an existing version
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          owner=${GITHUB_REPOSITORY%/*}
+          package=${GITHUB_REPOSITORY#*/}
+          if gh api --paginate "users/$owner/packages/container/${package,,}/versions" \
+            --jq '.[].metadata.container.tags[]' > "$RUNNER_TEMP/image-tags" 2> "$RUNNER_TEMP/registry-error"; then
+            if grep -Fxq "$VERSION" "$RUNNER_TEMP/image-tags"; then
+              echo "::error::The image version $VERSION already exists; tag a new version instead."
+              exit 1
+            fi
+          else
+            # Before the first publication the package does not exist yet.
+            grep -Fq '(HTTP 404)' "$RUNNER_TEMP/registry-error"
+          fi
+      - name: Build the amd64 image by digest
+        id: amd64
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          target: production
+          platforms: linux/amd64
+          provenance: false
+          outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
+          build-args: |
+            OMRON_VERSION=${{ steps.version.outputs.version }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ steps.version.outputs.version }}
+          cache-from: type=gha,scope=ci-production
+          github-token: ""
+      - name: Build the arm64 image by digest
+        id: arm64
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          target: production
+          platforms: linux/arm64
+          provenance: false
+          outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
+          build-args: |
+            OMRON_VERSION=${{ steps.version.outputs.version }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ steps.version.outputs.version }}
+          cache-from: type=gha,scope=ci-production
+          github-token: ""
+      - name: Check the amd64 image and generate its SBOM
+        env:
+          DIGEST: ${{ steps.amd64.outputs.digest }}
+          SBOM: ${{ runner.temp }}/sbom-amd64.spdx.json
+          PLATFORM: linux/amd64
+        run: |
+          bash tools/audit_image.sh "$IMAGE@$DIGEST" "$SBOM" "$PLATFORM"
+          printf 'Audited %s@%s\n' "$IMAGE" "$DIGEST" >> "$GITHUB_STEP_SUMMARY"
+      - name: Check the arm64 image and generate its SBOM
+        env:
+          DIGEST: ${{ steps.arm64.outputs.digest }}
+          SBOM: ${{ runner.temp }}/sbom-arm64.spdx.json
+          PLATFORM: linux/arm64
+        run: |
+          bash tools/audit_image.sh "$IMAGE@$DIGEST" "$SBOM" "$PLATFORM"
+          printf 'Audited %s@%s\n' "$IMAGE" "$DIGEST" >> "$GITHUB_STEP_SUMMARY"
+      - name: Publish the tested index as the version and latest
+        id: push
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          AMD64: ${{ steps.amd64.outputs.digest }}
+          ARM64: ${{ steps.arm64.outputs.digest }}
+        run: |
+          docker buildx imagetools create \
+            --tag "$IMAGE:$VERSION" --tag "$IMAGE:latest" \
+            "$IMAGE@$AMD64" "$IMAGE@$ARM64"
+          digest=$(docker buildx imagetools inspect "$IMAGE:$VERSION" --format '{{json .Manifest.Digest}}' | tr -d '"')
+          printf 'digest=%s\n' "$digest" >> "$GITHUB_OUTPUT"
+          printf 'Published %s:%s and %s:latest as %s\n' "$IMAGE" "$VERSION" "$IMAGE" "$digest" \
+            >> "$GITHUB_STEP_SUMMARY"
+      - name: Attest build provenance
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ steps.push.outputs.digest }}
+          push-to-registry: true
+          create-storage-record: false
+      # One SBOM per platform manifest: the inventories differ, so a single
+      # amd64 SBOM cannot describe the arm64 packages. Provenance covers the index.
+      - name: Attest the amd64 SBOM
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ steps.amd64.outputs.digest }}
+          sbom-path: ${{ runner.temp }}/sbom-amd64.spdx.json
+          push-to-registry: true
+          create-storage-record: false
+      - name: Attest the arm64 SBOM
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ steps.arm64.outputs.digest }}
+          sbom-path: ${{ runner.temp }}/sbom-arm64.spdx.json
+          push-to-registry: true
+          create-storage-record: false
+      # GHCR creates a package private even for a public repository, and a
+      # published image is worthless to a home lab if nobody can pull it. The
+      # anonymous pull below fails the job whenever the two drift apart again.
+      - name: Make the package public and verify an anonymous pull
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: |
+          owner=${GITHUB_REPOSITORY%/*}
+          package=${GITHUB_REPOSITORY#*/}
+          api_path="users/${owner,,}/packages/container/${package,,}"
+          if [ "$(gh api "$api_path" --jq .visibility 2>/dev/null)" != public ]; then
+            gh api --method PATCH "$api_path" -f visibility=public >/dev/null 2>&1 || true
+          fi
+          anonymous=$(mktemp -d)
+          trap 'rm -rf -- "$anonymous"' EXIT
+          attempts=6
+          while [ "$attempts" -gt 0 ]; do
+            if DOCKER_CONFIG="$anonymous" docker pull "$IMAGE@$DIGEST"; then
+              printf 'ghcr.io/%s is publicly pullable at %s\n' \
+                "${GITHUB_REPOSITORY,,}" "$DIGEST" >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            attempts=$((attempts - 1))
+            sleep 10
+          done
+          echo "::error::ghcr.io/${GITHUB_REPOSITORY,,} is not pullable without credentials. Set the package visibility to public once in its settings so this job can keep it in step with the repository."
+          exit 1

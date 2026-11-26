@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/MartinWa/omron-data/security/advisories/new
+    about: Report privately as SECURITY.md describes, using synthetic reproduction data.
+  - name: Question or usage help
+    url: https://github.com/MartinWa/omron-data/discussions
+    about: Ask about running, operating or self-hosting omron-data.
