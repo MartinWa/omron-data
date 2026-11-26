@@ -242,6 +242,13 @@ def test_the_default_static_root_ends_with_staticfiles(monkeypatch):
     assert Path(module.STATIC_ROOT).name == "staticfiles"
 
 
+def test_the_sqlite_connection_waits_for_a_lock_and_takes_the_write_lock_first():
+    options = settings_module.DATABASES["default"]["OPTIONS"]
+
+    assert options["timeout"] == 20
+    assert options["transaction_mode"] == "IMMEDIATE"
+
+
 def test_the_module_promises_the_login_urls_and_timezone_support():
     assert settings_module.LOGIN_URL == "login"
     assert settings_module.LOGIN_REDIRECT_URL == "readings"

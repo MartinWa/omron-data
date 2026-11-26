@@ -129,7 +129,7 @@ DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.sqlite3",
         "NAME": read_setting("OMRON_DB_PATH") or BASE_DIR / ".data" / "db.sqlite3",
-        "OPTIONS": {"timeout": 20},
+        "OPTIONS": {"timeout": 20, "transaction_mode": "IMMEDIATE"},
     }
 }
 

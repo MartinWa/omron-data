@@ -6,12 +6,21 @@ import pytest
 from django.contrib.auth import get_user_model
 from django.core.management import call_command
 from django.core.management.base import CommandError
-from django.db import connection
+from django.db import OperationalError, connection
 from django.test import Client, override_settings
 from django.test.utils import CaptureQueriesContext
 
 from parsing.report import Reading, parse_text
-from records.importer import CONFLICT, Rejected, import_readings, local_zone
+from records import importer
+from records.importer import (
+    BUSY_ATTEMPTS,
+    CONFLICT,
+    Rejected,
+    import_readings,
+    import_report,
+    local_zone,
+    retry_when_busy,
+)
 from records.management.commands.import_omron import stamp
 from records.models import ImportRun, Measurement
 from records.tokens import issue
@@ -633,3 +642,105 @@ def test_replay_and_overwrite_are_refused_together(owner, tmp_path):
 
     assert not Measurement.objects.filter(owner=owner).exists()
     assert not ImportRun.objects.exists()
+
+
+@pytest.mark.django_db(transaction=True)
+def test_an_import_takes_the_write_lock_before_it_reads_the_ledger_checksum(tmp_path):
+    owner = get_user_model().objects.create_user(username="alice")
+    path = tmp_path / "export.csv"
+    path.write_text(report("10 juni 2024,08:00,130,85,70,,"), encoding="utf-8")
+
+    with CaptureQueriesContext(connection) as captured:
+        import_report(owner, path)
+
+    statements = [query["sql"].lstrip().upper() for query in captured.captured_queries]
+    checksum_read = next(
+        index for index, sql in enumerate(statements) if "CONTENT_SHA256" in sql and "SELECT" in sql
+    )
+    assert statements[0] == "BEGIN IMMEDIATE"
+    assert checksum_read > 0
+    assert not any(sql == "BEGIN" for sql in statements)
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "database is locked",
+        "database table is locked",
+        "database is locked: SQLITE_BUSY_SNAPSHOT",
+    ],
+)
+def test_a_busy_database_message_is_retried_instead_of_failing(message):
+    attempts = []
+
+    def flaky():
+        attempts.append(1)
+        if len(attempts) == 1:
+            raise OperationalError(message)
+        return "imported"
+
+    assert retry_when_busy(flaky, backoff=0) == "imported"
+    assert len(attempts) == 2
+
+
+def test_a_busy_database_that_never_clears_gives_up_after_a_few_attempts():
+    attempts = []
+
+    def always_busy():
+        attempts.append(1)
+        raise OperationalError("database is locked")
+
+    with pytest.raises(OperationalError, match="database is locked"):
+        retry_when_busy(always_busy, backoff=0)
+
+    assert len(attempts) == BUSY_ATTEMPTS
+
+
+def test_a_broken_statement_is_not_retried():
+    attempts = []
+
+    def broken():
+        attempts.append(1)
+        raise OperationalError("no such table: records_measurement")
+
+    with pytest.raises(OperationalError, match="no such table"):
+        retry_when_busy(broken, backoff=0)
+
+    assert len(attempts) == 1
+
+
+def test_a_programming_error_is_not_retried():
+    attempts = []
+
+    def rejects():
+        attempts.append(1)
+        raise ValueError("invalid staging target")
+
+    with pytest.raises(ValueError, match="invalid staging target"):
+        retry_when_busy(rejects, backoff=0)
+
+    assert len(attempts) == 1
+
+
+def test_an_import_interrupted_by_a_busy_database_is_retried_without_a_duplicate_run(
+    owner, tmp_path, monkeypatch
+):
+    path = tmp_path / "export.csv"
+    path.write_text(report("10 juni 2024,08:00,130,85,70,,"), encoding="utf-8")
+    stored = importer._stored
+    lookups = []
+
+    def busy_after_the_first_write(*args, **kwargs):
+        lookups.append(1)
+        if len(lookups) == 2:
+            raise OperationalError("database is locked")
+        return stored(*args, **kwargs)
+
+    monkeypatch.setattr(importer, "_stored", busy_after_the_first_write)
+
+    result = import_report(owner, path)
+
+    assert result["created"] == 3
+    assert len(lookups) == 4
+    assert ImportRun.objects.filter(owner=owner).count() == 1
+    assert Measurement.objects.filter(owner=owner).count() == 4

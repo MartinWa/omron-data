@@ -9,7 +9,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from parsing.report import UnknownReportError
-from records.importer import COUNTS, INVALID, REPORTED, Rejected, import_report
+from records.importer import COUNTS, INVALID, REPORTED, Rejected, import_report, retry_when_busy
 
 REPLAY_OVERWRITE = (
     "--replay and --overwrite cannot be combined: replay only fills gaps, "
@@ -106,6 +106,9 @@ class Command(BaseCommand):
             self.stdout.write(text)
 
     def _preview(self, files: list[Path], options) -> list[str]:
+        return retry_when_busy(lambda: self._preview_once(files, options))
+
+    def _preview_once(self, files: list[Path], options) -> list[str]:
         with transaction.atomic():
             texts = self._run(files, options)
             transaction.set_rollback(True)
