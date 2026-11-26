@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -9,7 +8,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from django.conf import settings
-from django.db import OperationalError, transaction
+from django.db import transaction
 
 from parsing.report import Reading, parse_text
 
@@ -20,28 +19,6 @@ COUNTS = ("created", "skipped", "conflicts", "overwritten", "panels")
 REPORTED = (*COUNTS, "invalid")
 CONFLICT = "conflict"
 INVALID = "invalid"
-BUSY_ATTEMPTS = 4
-BUSY_BACKOFF_SECONDS = 0.05
-BUSY_MESSAGES = ("database is locked", "database table is locked", "SQLITE_BUSY_SNAPSHOT")
-
-
-def busy_database(error: Exception) -> bool:
-    if not isinstance(error, OperationalError):
-        return False
-    message = str(error)
-    return any(text in message for text in BUSY_MESSAGES)
-
-
-def retry_when_busy(operation, *, attempts: int | None = None, backoff: float | None = None):
-    limit = BUSY_ATTEMPTS if attempts is None else attempts
-    pause = BUSY_BACKOFF_SECONDS if backoff is None else backoff
-    for attempt in range(1, limit + 1):
-        try:
-            return operation()
-        except OperationalError as error:
-            if attempt >= limit or not busy_database(error):
-                raise
-            time.sleep(pause * attempt)
 
 
 @dataclass(frozen=True)
@@ -209,14 +186,8 @@ def _span(readings: list[Reading], tz: ZoneInfo) -> tuple[datetime | None, datet
     return (min(moments), max(moments))
 
 
-def import_report(
-    owner, path: Path, *, overwrite: bool = False, replay: bool = False
-) -> dict[str, object]:
-    return retry_when_busy(lambda: _import_report(owner, path, overwrite=overwrite, replay=replay))
-
-
 @transaction.atomic
-def _import_report(
+def import_report(
     owner, path: Path, *, overwrite: bool = False, replay: bool = False
 ) -> dict[str, object]:
     content = path.read_bytes()
