@@ -36,7 +36,7 @@
       <nav class="site-nav" aria-label="Main">
         <a href="{% url 'readings' %}"{% if request.resolver_match.url_name == 'readings' %} class="active" aria-current="page"{% endif %}>Readings</a>
         <a href="{% url 'dashboards' %}"{% if request.resolver_match.url_name == 'dashboards' or request.resolver_match.url_name == 'dashboard_metric' %} class="active" aria-current="page"{% endif %}>Dashboards</a>
-        <a href="{% url 'imports' %}"{% if request.resolver_match.url_name == 'imports' or request.resolver_match.url_name == 'import_upload' or request.resolver_match.url_name == 'import_preview' %} class="active" aria-current="page"{% endif %}>Imports</a>
+        <a href="{% url 'imports' %}"{% if request.resolver_match.url_name == 'imports' or request.resolver_match.url_name == 'import_preview' %} class="active" aria-current="page"{% endif %}>Imports</a>
         <a href="{% url 'tokens' %}"{% if request.resolver_match.url_name == 'tokens' %} class="active" aria-current="page"{% endif %}>Tokens</a>
       </nav>
       {% endif %}

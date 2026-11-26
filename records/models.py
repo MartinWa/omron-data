@@ -2,6 +2,7 @@ from dataclasses import dataclass
 
 from django.conf import settings
 from django.db import models
+from django.utils import timezone
 
 
 @dataclass(frozen=True)
@@ -25,9 +26,9 @@ METRICS = {
         Metric("visceral_fat", ""),
         Metric("resting_metabolism", "kcal"),
         Metric("impedance", "ohm"),
-        Metric("fat_free_mass", "kg"),
-        Metric("average_weight", "kg"),
-        Metric("average_fat_free_mass", "kg"),
+        Metric("fat_mass", "kg"),
+        Metric("average_weight_change", "kg"),
+        Metric("average_fat_mass", "kg"),
         Metric("body_temperature", "°C"),
     )
 }
@@ -100,16 +101,25 @@ class ApiToken(models.Model):
         settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="api_tokens"
     )
     name = models.CharField(max_length=64)
-    prefix = models.CharField(max_length=12)
+    prefix = models.CharField(max_length=12, db_index=True)
     digest = models.CharField(max_length=64, unique=True)
     created_at = models.DateTimeField(auto_now_add=True)
-    revoked = models.BooleanField(default=False)
+    expires_at = models.DateTimeField(null=True, blank=True)
+    revoked_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         ordering = ["-created_at"]
         constraints = [
             models.UniqueConstraint(fields=["owner", "name"], name="uniq_token_owner_name")
         ]
+
+    @property
+    def status(self) -> str:
+        if self.revoked_at is not None:
+            return "revoked"
+        if self.expires_at is not None and self.expires_at <= timezone.now():
+            return "expired"
+        return "active"
 
     def __str__(self) -> str:
         return f"{self.name} ({self.prefix})"

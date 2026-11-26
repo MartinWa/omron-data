@@ -276,7 +276,7 @@ def test_an_empty_database_shows_the_import_call_to_action(client, db):
     body = content_of(client.get(reverse("dashboards")))
 
     assert "No readings yet." in body
-    assert 'href="/imports/upload/"' in body
+    assert 'href="/imports/"' in body
     assert "Import a CSV export" in body
     assert "report-kpis" not in body
 
@@ -638,6 +638,8 @@ def test_the_printed_page_hides_the_nav_and_keeps_tables_open(signed_in):
     assert ".site-header," in print_block
     assert print_block.index(".site-header,") < print_block.index("display: none")
     assert ".segmented," in print_block
+    assert "details[data-print-open]::details-content" in print_block
+    assert "content-visibility: visible" in print_block
 
 
 def test_the_print_script_opens_the_data_tables():

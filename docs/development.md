@@ -60,7 +60,7 @@ browser `POST`s fail the CSRF origin check.
 ## Container development
 
 `compose.development.yaml` is a standalone development stack. It builds the `development`
-target of the Dockerfile, publishes `127.0.0.1:8000` only, needs no `.env`, and bind-mounts
+target of the Dockerfile, publishes `127.0.0.1:8030` only, needs no `.env`, and bind-mounts
 your working copy at `/app`:
 
 ```sh
@@ -167,14 +167,14 @@ alone.
 | `settings.py` | The settings module the suite runs with |
 | `test_report.py` | The parser: section detection, aliases, locale, the two body sections collapsing |
 | `test_import.py` | The importer: counts, panels and components, conflicts, overwrite, replay, invalid timestamps |
-| `test_import_pages.py` | Upload, preview, confirm, cancel, the replay checkbox, and purging from the ledger |
+| `test_import_pages.py` | The upload card on `/imports/`, preview, confirm, cancel, the replay checkbox, and purging from the ledger |
 | `test_ledger.py` | The import ledger and what the command line reports per file and in total |
 | `test_readings_page.py` | The readings page: filters, event grouping, badges, paging, the empty states |
 | `test_reports.py` | Chart geometry and the SVG partial |
 | `test_dashboards.py` | The dashboards page: range chips, KPIs, each card, the heatmap, the drill-down, print |
-| `test_tokens_page.py` | Creating, revoking and deleting a token, and what is stored |
+| `test_tokens_page.py` | Creating, revoking, expiring and deleting a token, and what is stored |
 | `test_admin.py` | The read-only admin for measurements, runs and tokens |
-| `test_api_auth.py` | Bearer tokens, revoked tokens and deactivated owners |
+| `test_api_auth.py` | Bearer tokens, revoked and expired tokens, deactivated owners, shared prefixes |
 | `test_api_contract.py` | The envelope, every parameter guardrail, level and include, paging, `Cache-Control` |
 | `test_shell.py` | The base template, the navigation, the theme bootstrap, static assets, formatting filters |
 | `test_error_pages.py` | The 404 and 500 pages |

@@ -49,9 +49,9 @@ database until you confirm the preview.
 Uploads through the browser never write a reading; they stage the file and show what
 the import would do.
 
-1. **`/imports/upload/`** — choose the CSV, or drag it onto the page, then *Preview*.
-   The file is staged in a private temporary directory outside the database and
-   outside the repository.
+1. **`/imports/`** — choose the CSV in the *Import a CSV export* card, or drag it onto
+   it, then *Preview*. The file is staged in a private temporary directory outside the
+   database and outside the repository.
 2. **`/imports/preview/`** — the counts the import would produce, an *already
    imported* notice when the same file has been imported before, a warnings section,
    and the first ten readings in the file with the rest behind *Show all*. Nothing
@@ -134,7 +134,9 @@ stored for your account*, and adds how many events match the filters when any ar
 An **event** is one moment. Everything measured at that timestamp is grouped into one
 card: a blood-pressure reading, a body-composition reading, or both when the app
 recorded them at the same minute. The card header carries the date and time, the
-event's title, its note when it has one, and one badge per group.
+event's title, its note when it has one, and one badge per group. An event with a single
+metric is titled with that metric; a scale reading that carries several is titled
+*Weigh-in*, and its rows sit one per line rather than under a repeated heading.
 
 **A blood-pressure event is a panel with components.** The panel is the event itself and
 holds the note the app wrote; its components are the systolic, diastolic and pulse rows
@@ -161,7 +163,10 @@ opens every card, and prints on a white sheet even in the dark theme.
 
 ## The imports page
 
-`/imports/` is the ledger, newest run first and 25 runs per page.
+`/imports/` holds both halves of importing: the **Import a CSV export** card at the top and
+the ledger of past runs below it, newest run first and 25 runs per page. Choosing a file in
+the card, or dropping one on it, posts it to the same page, which stages it and sends you to
+the preview. Nothing is written here.
 
 | Column | Meaning |
 | --- | --- |
@@ -192,11 +197,12 @@ the first eight characters are stored.
 
 | Action | What happens |
 | --- | --- |
-| Create | Give the token a name you will recognise; the name is unique per account. The secret is shown once, with a *Copy* button, and cannot be recovered afterwards |
+| Create | Give the token a name you will recognise; the name is unique per account. The secret is shown once, with a *Copy* button, and cannot be recovered afterwards. *Expires in days* is optional: leave it empty for a token that does not expire on its own |
 | Revoke | Clients using it stop working on their next request. The row stays, so you keep the record of what existed |
-| Delete | Only offered once a token is revoked, and removes the row for good so the name can be used again |
+| Delete | Only offered once a token is revoked or expired, and removes the row for good so the name can be used again |
 
-A working token cannot be deleted: revoke it first. Replace a lost secret with a new
+A working token cannot be deleted: revoke it first. An expired token needs no revoke; it
+is refused by the API and can be deleted straight away. Replace a lost secret with a new
 token rather than trying to recover the old one. See [API](api.md) for how a request
 authenticates.
 

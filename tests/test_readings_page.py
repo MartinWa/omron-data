@@ -1,10 +1,12 @@
 from datetime import datetime, timedelta
 from decimal import Decimal
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import pytest
 from django.conf import settings
 from django.contrib.auth import get_user_model
+from django.contrib.staticfiles import finders
 from django.urls import reverse
 
 from parsing.report import parse_text
@@ -80,7 +82,12 @@ def test_two_metrics_at_one_moment_share_a_single_event(client):
     content = client.get(reverse("readings")).content.decode()
 
     assert content.count(DETAILS) == 1
-    assert content.count('scope="rowgroup"') == 2
+    assert content.count('scope="rowgroup"') == 0
+    assert content.count('scope="row"') == 2
+    assert content.count("<td>Pulse</td>") == 0
+    assert content.count('<th scope="row">Pulse</th>') == 1
+    assert content.count('<th scope="row">Weight</th>') == 1
+    assert ">Weigh-in<" in content
     assert "2 readings" in content
 
 
@@ -292,3 +299,21 @@ def test_the_page_loads_the_filter_and_print_scripts(client):
     assert "records/filters.js" in content
     assert "records/print.js" in content
     assert content.count("data-print-open") == 1
+
+
+@pytest.mark.django_db
+def test_a_row_header_does_not_borrow_the_column_header_style():
+    css = Path(finders.find("records/app.css")).read_text(encoding="utf-8")
+    block = css[css.index('.table tbody th[scope="row"]') :]
+
+    assert "font-weight: 400" in block[:400]
+    assert "text-transform: none" in block[:400]
+
+
+@pytest.mark.django_db
+def test_the_last_row_rule_still_draws_lines_between_single_row_groups():
+    css = Path(finders.find("records/app.css")).read_text(encoding="utf-8")
+    block = css[css.index(".table tbody:last-of-type tr:last-child") :][:140]
+
+    assert "td," in block
+    assert "th {" in block

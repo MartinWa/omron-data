@@ -33,6 +33,7 @@
           <th scope="col">Name</th>
           <th scope="col">Prefix</th>
           <th scope="col">Created</th>
+          <th scope="col">Expires</th>
           <th scope="col">Status</th>
           <th scope="col" class="tight">Actions</th>
         </tr>
@@ -43,16 +44,19 @@
           <td data-label="Name">{{ token.name }}</td>
           <td data-label="Prefix"><code>{{ token.prefix }}…</code></td>
           <td data-label="Created" class="muted">{{ token.created_at|isodate:"day" }}</td>
+          <td data-label="Expires" class="muted">{{ token.expires_at|isodate:"day" }}</td>
           <td data-label="Status">
-            {% if token.revoked %}
+            {% if token.status == "revoked" %}
             <span class="badge badge-danger">revoked</span>
+            {% elif token.status == "expired" %}
+            <span class="badge badge-warning">expired</span>
             {% else %}
             <span class="badge badge-success">active</span>
             {% endif %}
           </td>
           <td class="tight" data-actions>
             <div class="row-confirm" data-row-confirm>
-              {% if token.revoked %}
+              {% if token.status != "active" %}
               <a class="btn btn-sm btn-danger" href="?confirm={{ token.pk }}" data-row-start>Delete</a>
               <form method="post" action="{% url 'delete_token' token.pk %}" data-row-form{% if request.GET.confirm != token.pk|stringformat:"s" %} hidden{% endif %}>
                 {% csrf_token %}
@@ -86,6 +90,7 @@
   <form method="post" class="form">
     {% csrf_token %}
     {% include "partials/field.html" with field=form.name %}
+    {% include "partials/field.html" with field=form.expires_in_days %}
     <div class="actions">
       <button class="btn btn-primary" type="submit">Create</button>
     </div>

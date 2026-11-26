@@ -159,6 +159,9 @@ or let them create one on `/tokens/`:
 docker compose exec web python manage.py make_token --owner <name> --name laptop
 ```
 
+Add `--expires-days 90` to give that token an expiry, so a leaked secret stops working on
+its own instead of waiting to be noticed and revoked.
+
 Every account is separate: each one imports its own exports, keeps its own tokens, and
 never sees another account's readings outside the admin.
 

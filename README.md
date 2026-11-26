@@ -54,9 +54,15 @@ Blood pressure rows: `systolic_bp`, `diastolic_bp`, `pulse`, plus the note the a
 (`AFib` lands in `Mätläge`; `Anmärkningar` is read when it has text), kept on the panel.
 
 Body composition rows: `body_weight`, `bmi`, `body_fat_pct`, `skeletal_muscle_pct`,
-`visceral_fat`, `resting_metabolism`, `impedance`, `fat_free_mass`, `body_water_pct`,
-`average_weight`, `average_fat_free_mass`, and body temperature when the export carries a
+`visceral_fat`, `resting_metabolism`, `impedance`, `fat_mass`, `body_water_pct`,
+`average_weight_change`, `average_fat_mass`, and body temperature when the export carries a
 temperature section. Fields the app leaves as `-` are not stored.
+
+Two of those names do not match the export's headers, deliberately. OMRON labels the column
+`Fettfri massa (kg)` but the value it holds is fat mass — it equals weight times body fat
+percentage in all 115 real readings — so it is stored as `fat_mass`; fat-free mass is
+`body_weight` minus `fat_mass`. And `Genomsnittlig vikt (kg)` holds an average weight in some
+rows and a small weight change in others, so it is stored as `average_weight_change`.
 
 A file holds several sections, each with its own header, and they do not spell the same
 thing the same way: `Kroppsfett (%)` and `Kroppsfett–procent` are one measurement, and the

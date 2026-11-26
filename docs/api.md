@@ -25,11 +25,12 @@ curl -H "authorization: Bearer $TOKEN" http://localhost:8000/api/v1/summary
 - Only a SHA-256 digest of the secret and its first 8 characters are stored, so a database
   copy does not hand anyone a working token. The 8-character prefix is what the tokens
   page shows beside the name.
-- A missing, malformed, unknown or revoked token is a `401` with
+- A missing, malformed, unknown, revoked or expired token is a `401` with
   `error.code: "invalid_credentials"` and `WWW-Authenticate: Bearer`. So is a token whose
   account has been deactivated; reactivating the account makes the same token work again.
 - Secrets are created on `/tokens/` in the UI or with `manage.py make_token`, and are shown
-  once. See [usage](usage.md#the-tokens-page).
+  once. A token may carry an expiry date and stops working when it passes. See
+  [usage](usage.md#the-tokens-page).
 
 ## Envelope
 

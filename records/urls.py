@@ -9,7 +9,6 @@ urlpatterns = [
     path("dashboards/", views.dashboards, name="dashboards"),
     path("dashboards/<slug:metric>/", views.dashboard_metric, name="dashboard_metric"),
     path("imports/", views.imports, name="imports"),
-    path("imports/upload/", views.import_upload, name="import_upload"),
     path("imports/preview/", views.import_preview, name="import_preview"),
     path("imports/<int:pk>/purge/", views.purge_import_run, name="purge_import_run"),
     path("tokens/", views.tokens, name="tokens"),

@@ -605,11 +605,13 @@ main.container {
   white-space: nowrap;
 }
 
-.table tbody tr:last-child td {
+.table tbody:last-of-type tr:last-child td,
+.table tbody:last-of-type tr:last-child th {
   border-bottom: 0;
 }
 
-.table tbody tr:hover td {
+.table tbody tr:hover td,
+.table tbody tr:hover th[scope="row"] {
   background: color-mix(in srgb, var(--accent-soft) 45%, transparent);
 }
 
@@ -1303,6 +1305,16 @@ a.pager-page:hover {
   color: var(--text);
   font-size: 0.9rem;
   font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+  white-space: normal;
+}
+
+.table tbody th[scope="row"] {
+  background: transparent;
+  color: var(--text);
+  font-size: 0.9rem;
+  font-weight: 400;
   letter-spacing: 0;
   text-transform: none;
   white-space: normal;
@@ -2278,6 +2290,10 @@ a.pager-page:hover {
 
   .session > .session-head::before {
     display: none;
+  }
+
+  details[data-print-open]::details-content {
+    content-visibility: visible;
   }
 
   .badge {

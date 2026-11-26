@@ -90,15 +90,21 @@
       </thead>
       {% for group in event.groups %}
       <tbody>
+        {% if group.count > 1 %}
         <tr class="set-group">
           <th scope="rowgroup" colspan="4">
             {{ group.label }}
             <span class="set-group-count">{{ group.count }} reading{{ group.count|pluralize }}</span>
           </th>
         </tr>
+        {% endif %}
         {% for row in group.rows %}
         <tr>
+          {% if group.count > 1 %}
           <td>{{ row.label }}</td>
+          {% else %}
+          <th scope="row">{{ row.label }}</th>
+          {% endif %}
           <td class="num">{{ row.value|num }}</td>
           <td class="muted">{{ row.unit }}</td>
           <td class="muted">{{ row.note }}</td>
