@@ -37,15 +37,15 @@ still inside the thing you meant to protect.
 
 `cp omron.sqlite3` while the app is running can capture a torn or stale file:
 
-- `omron_data/settings.py` sets a 20-second busy timeout and no journal mode, so the
-  database runs in SQLite's default rollback-journal mode. A write in flight is in
-  `omron.sqlite3-journal` until it commits, and a copy taken in the middle of it is not a
-  database.
-- If write-ahead logging is ever in use, a `omron.sqlite3-wal` and an `omron.sqlite3-shm`
-  appear next to the database. The newest committed rows then live in the `-wal` file, and
-  the main file on its own is missing them; the `-shm` is the matching index. Copying the
-  database without its sidecars loses the newest data, and copying the sidecars without the
-  database is worse.
+- `records/db.py` switches every file database to write-ahead logging on connect, so an
+  import and an API request can share the file without blocking each other. That means an
+  `omron.sqlite3-wal` and an `omron.sqlite3-shm` sit next to the database while it is open:
+  the newest committed rows live in the `-wal` file and the `-shm` is its index. The main
+  file on its own is missing them, and copying the sidecars without the database is worse,
+  so `cp` is not a backup.
+- The same module sets `synchronous=NORMAL` and the 20-second busy timeout in
+  `omron_data/settings.py` means a second writer waits for the first rather than failing with
+  "database is locked".
 
 The online backup API above reads a consistent snapshot and needs neither. If you must
 take a filesystem-level snapshot instead, stop the container first:
