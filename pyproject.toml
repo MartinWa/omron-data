@@ -1,0 +1,39 @@
+[project]
+name = "omron-data"
+version = "0.1.0"
+description = "Self-hosted OMRON connect CSV import with a private SQLite database and a read-only JSON API"
+readme = "README.md"
+requires-python = ">=3.14,<3.15"
+license = "PolyForm-Noncommercial-1.0.0"
+dependencies = [
+    "django>=5.2.8,<5.3",
+    "django-ninja>=1.4,<2",
+    "waitress>=3,<4",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3,<10",
+    "pytest-django>=4.9,<5",
+    "ruff>=0.8,<1",
+]
+
+[tool.uv]
+package = false
+
+[tool.ruff]
+target-version = "py314"
+line-length = 100
+exclude = [".venv", "planning", "reference"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM", "S"]
+
+[tool.ruff.lint.per-file-ignores]
+"*/migrations/*.py" = ["E501"]
+"tests/*.py" = ["S101", "E501"]
+
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "omron_data.settings"
+python_files = ["test_*.py"]
+testpaths = ["tests"]
