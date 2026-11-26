@@ -111,10 +111,10 @@
 <div class="card">
   <div class="card-head">
     <h2>Readings in this file</h2>
-    <span class="badge">{{ summary.readings|length }}</span>
+    <span class="badge">{{ summary.readings_total }}</span>
   </div>
   {% if summary.readings|length > 10 %}
-  <p class="muted small">Showing the first 10 of {{ summary.readings|length }} readings.</p>
+  <p class="muted small">Showing the first 10 of {{ summary.readings_total }} readings.</p>
   {% endif %}
   <div class="table-wrap">
     <table class="table">
@@ -131,7 +131,7 @@
   </div>
   {% if summary.readings|length > 10 %}
   <details class="show-all">
-    <summary>Show all {{ summary.readings|length }} readings</summary>
+    <summary>Show all {{ summary.readings_total }} readings</summary>
     <div class="table-wrap">
       <table class="table">
         <caption class="visually-hidden">Remaining readings in this export, newest first</caption>

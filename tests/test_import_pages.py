@@ -1,5 +1,6 @@
+import json
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal
 from hashlib import sha256
 from pathlib import Path
@@ -11,8 +12,9 @@ from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.urls import reverse
 
+from parsing.report import Reading
 from records import pending
-from records.importer import import_report
+from records.importer import import_readings, import_report
 from records.limits import MAX_UPLOAD_BYTES, MAX_UPLOAD_MEGABYTES, MULTIPART_OVERHEAD_BYTES
 from records.models import ImportRun, Measurement
 from records.views import (
@@ -25,7 +27,7 @@ from records.views import (
     RUN_NOT_FOUND_MESSAGE,
     TOO_LARGE_MESSAGE,
 )
-from tests.test_import import report
+from tests.test_import import report, window
 
 FRESH = report(
     "02 september 2024,08:00,120,80,60,,",
@@ -71,6 +73,113 @@ def zone() -> ZoneInfo:
 
 def stored_value(owner, metric: str, moment: datetime):
     return Measurement.objects.get(owner=owner, metric=metric, at=moment).value
+
+
+@pytest.mark.django_db
+def test_the_coverage_table_counts_every_gap_longer_than_a_week(client, db):
+    owner = get_user_model().objects.create_user(username="coverage")
+    import_readings(owner, window("02 januar 2024,08:00,120,80,60,,"))
+    import_readings(
+        owner,
+        [
+            Reading(datetime(2024, 1, 1, 8, 0), "body_weight", Decimal("70")),
+            Reading(datetime(2024, 1, 2, 8, 0), "body_weight", Decimal("71")),
+            Reading(datetime(2024, 1, 30, 8, 0), "body_weight", Decimal("72")),
+            Reading(datetime(2024, 1, 31, 8, 0), "body_weight", Decimal("73")),
+            Reading(datetime(2024, 3, 15, 8, 0), "body_weight", Decimal("74")),
+        ],
+    )
+    ImportRun.objects.create(
+        owner=owner, file_name="coverage.csv", content_sha256="c" * 64, readings=8
+    )
+    client.force_login(owner)
+
+    response = client.get(reverse("imports"))
+
+    coverage = response.context["coverage"]
+    assert coverage["gaps"] == 2
+    assert coverage["readings"] == 8
+    assert coverage["events"] == 5
+    assert [row["metric"] for row in coverage["metrics"]] == [
+        "blood_pressure",
+        "body_weight",
+        "diastolic_bp",
+        "pulse",
+        "systolic_bp",
+    ]
+    weight = coverage["metrics"][1]
+    assert weight["count"] == 5
+    assert weight["first"] == datetime(2024, 1, 1, 8, 0, tzinfo=zone())
+    assert weight["last"] == datetime(2024, 3, 15, 8, 0, tzinfo=zone())
+    assert [gap["span"] for gap in weight["gaps"]] == ["28d 0h", "44d 0h"]
+    assert [gap["before"] for gap in weight["gaps"]] == [
+        datetime(2024, 1, 2, 8, 0, tzinfo=zone()),
+        datetime(2024, 1, 31, 8, 0, tzinfo=zone()),
+    ]
+    body = response.content.decode()
+    assert "2 gaps" in body
+    assert "2024-01-02 08:00 → 2024-01-30 08:00 (28d 0h)" in body
+
+
+@pytest.mark.django_db
+def test_the_coverage_table_counts_no_gap_for_readings_within_a_week(client, db):
+    owner = get_user_model().objects.create_user(username="dense")
+    import_readings(
+        owner,
+        [
+            Reading(datetime(2024, 1, day, 8, 0), "body_weight", Decimal("70") + day)
+            for day in (1, 2, 3, 10, 11, 18)
+        ],
+    )
+    client.force_login(owner)
+
+    coverage = client.get(reverse("imports")).context["coverage"]
+
+    assert coverage["gaps"] == 0
+    assert coverage["metrics"][0]["gaps"] == []
+
+
+@pytest.mark.django_db
+def test_a_long_export_keeps_only_the_newest_five_hundred_readings(client, alice):
+    client.force_login(alice)
+    start = datetime(2024, 1, 1, 0, 0)
+    lines = [
+        f"{(start + timedelta(hours=index)).day:02d} januari 2024,"
+        f"{start + timedelta(hours=index):%H:%M},120,80,60,,"
+        for index in range(400)
+    ]
+    upload(client, report(*lines))
+
+    import_id = client.session["pending_import"]["id"]
+    summary = pending.load_summary(import_id)
+    content = client.get(reverse("import_preview")).content.decode()
+
+    assert summary["readings_total"] == 1200
+    assert len(summary["readings"]) == 500
+    assert summary["readings"][0]["at"] == "2024-01-17 15:00"
+    assert summary["readings"][-1]["at"] == "2024-01-10 17:00"
+    assert "Showing the first 10 of 1200 readings." in content
+    assert "<summary>Show all 1200 readings</summary>" in content
+    assert content.count('<td class="muted nowrap">') == 500
+
+
+@pytest.mark.django_db
+def test_a_capped_summary_stays_far_below_the_rendered_page_size(client, alice, tmp_path):
+    client.force_login(alice)
+    start = datetime(2024, 1, 1, 0, 0)
+    lines = [
+        f"{(start + timedelta(hours=index)).day:02d} januari 2024,"
+        f"{start + timedelta(hours=index):%H:%M},120,80,60,,"
+        for index in range(400)
+    ]
+    upload(client, report(*lines))
+    import_id = client.session["pending_import"]["id"]
+    stored = pending.pending_root() / import_id / "summary.json"
+
+    summary = json.loads(stored.read_text(encoding="utf-8"))
+
+    assert stored.stat().st_size < 60000
+    assert len(summary["readings"]) == 500
 
 
 @pytest.mark.django_db

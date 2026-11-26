@@ -1,8 +1,11 @@
 import calendar
 import math
-from datetime import date, timedelta
+from datetime import date, datetime, time, timedelta
 from urllib.parse import urlencode
+from zoneinfo import ZoneInfo
 
+from django.conf import settings
+from django.db.models import Count, Min
 from django.urls import reverse
 from django.utils import timezone
 
@@ -319,6 +322,7 @@ MOVING_AVERAGE_WEEKS = 4
 SEVEN_DAYS = 7
 METRIC_ROW_LIMIT = 500
 PRESSURE_UNITS = {"Systolic": "mmHg", "Diastolic": "mmHg", "Pulse": "/min"}
+PRESSURE_METRICS = ("systolic_bp", "diastolic_bp")
 
 METRIC_LABELS = {
     "blood_pressure": "Blood pressure",
@@ -444,14 +448,19 @@ def _week_start(day):
     return day - timedelta(days=day.weekday())
 
 
-def _history(owner):
+def _day_start(day):
+    return datetime.combine(day, time.min, tzinfo=ZoneInfo(settings.OMRON_TIME_ZONE))
+
+
+def _history(owner, window=None):
     series = {}
-    rows = (
-        Measurement.objects.filter(owner=owner)
-        .order_by("at", "id")
-        .values_list("metric", "at", "value", "note")
-    )
-    for metric, at, value, note in rows:
+    rows = Measurement.objects.filter(owner=owner)
+    if window:
+        start, end = window
+        rows = rows.filter(at__gte=_day_start(start), at__lt=_day_start(end + timedelta(days=1)))
+    for metric, at, value, note in rows.order_by("at", "id").values_list(
+        "metric", "at", "value", "note"
+    ):
         if value is None:
             continue
         moment = timezone.localtime(at) if timezone.is_aware(at) else at
@@ -467,11 +476,21 @@ def _history(owner):
     return series
 
 
-def _first_date(series):
-    return min(
-        (point["date"] for points in series.values() for point in points),
-        default=None,
-    )
+def _first_date(owner):
+    earliest = Measurement.objects.filter(owner=owner, value__isnull=False).aggregate(
+        first=Min("at")
+    )["first"]
+    if earliest is None:
+        return None
+    moment = timezone.localtime(earliest) if timezone.is_aware(earliest) else earliest
+    return moment.date()
+
+
+def _fetch_window(resolved):
+    starts = [resolved["start"], resolved["end"] - timedelta(days=HEATMAP_DAYS)]
+    if resolved["previous"]:
+        starts.append(resolved["previous"]["start"])
+    return min(starts), resolved["end"]
 
 
 def _in_window(points, start, end):
@@ -509,14 +528,33 @@ def _pressure_text(systolic, diastolic):
     return f"{num(systolic)}/{num(diastolic)} mmHg"
 
 
-def _latest_pair(series):
-    systolic = {point["at"]: point["value"] for point in series.get("systolic_bp", [])}
-    diastolic = {point["at"]: point["value"] for point in series.get("diastolic_bp", [])}
-    shared = sorted(set(systolic) & set(diastolic))
-    if not shared:
+def _latest_pair(owner):
+    at = (
+        Measurement.objects.filter(owner=owner, metric__in=PRESSURE_METRICS, value__isnull=False)
+        .values("at")
+        .annotate(count=Count("metric"))
+        .filter(count=len(PRESSURE_METRICS))
+        .order_by("-at")
+        .values_list("at", flat=True)
+        .first()
+    )
+    if at is None:
         return None
-    moment = shared[-1]
-    return systolic[moment], diastolic[moment]
+    values = dict(
+        Measurement.objects.filter(owner=owner, at=at, metric__in=PRESSURE_METRICS).values_list(
+            "metric", "value"
+        )
+    )
+    return values["systolic_bp"], values["diastolic_bp"]
+
+
+def _latest_weight(owner):
+    return (
+        Measurement.objects.filter(owner=owner, metric="body_weight", value__isnull=False)
+        .order_by("-at", "-id")
+        .values_list("value", flat=True)
+        .first()
+    )
 
 
 def _axis_unit(unit):
@@ -534,13 +572,13 @@ def _day_ticks(start, end, maximum=4):
     return ticks
 
 
-def _kpi_cards(series, resolved, last_import):
+def _kpi_cards(owner, series, resolved, last_import):
     start = resolved["start"]
     end = resolved["end"]
     previous = resolved["previous"]
     versus = f"the previous {RANGE_LABELS[resolved['key']]}" if previous else "the previous period"
 
-    pair = _latest_pair(series)
+    pair = _latest_pair(owner)
     latest_text = "—" if pair is None else _pressure_text(*pair)
 
     seven_start = end - timedelta(days=SEVEN_DAYS - 1)
@@ -558,8 +596,8 @@ def _kpi_cards(series, resolved, last_import):
     )
 
     weights = _in_window(series.get("body_weight", []), start, end)
-    latest_weights = series.get("body_weight", [])
-    latest_weight_text = "—" if not latest_weights else f"{num(latest_weights[-1]['value'])} kg"
+    latest_weight = _latest_weight(owner)
+    latest_weight_text = "—" if latest_weight is None else f"{num(latest_weight)} kg"
     previous_weight = _mean(
         point["value"] for point in _window(series.get("body_weight", []), previous)
     )
@@ -904,19 +942,20 @@ def _extremes_card(series, resolved):
 
 def build_dashboards(owner, params, today):
     parsed = parse_dashboard_params(params)
-    series = _history(owner)
+    earliest = _first_date(owner)
     context = {
-        "has_data": bool(series),
+        "has_data": earliest is not None,
         "today": today,
         "range_key": parsed["range"],
         "metric": parsed["metric"],
         "range_options": _options(RANGE_KEYS, RANGE_LABELS, parsed["range"]),
         "metric_options": _options(COMPOSITION_METRICS, METRIC_LABELS, parsed["metric"]),
     }
-    if not series:
+    if earliest is None:
         return context
 
-    resolved = resolve_range(parsed["range"], today, _first_date(series))
+    resolved = resolve_range(parsed["range"], today, earliest)
+    series = _history(owner, _fetch_window(resolved))
     start = resolved["start"]
     end = resolved["end"]
     readings = _range_readings(series, start, end)
@@ -928,7 +967,7 @@ def build_dashboards(owner, params, today):
             "last_import": last_import,
             "readings_total": len(readings),
             "range_empty": not readings,
-            "kpis": _kpi_cards(series, resolved, last_import),
+            "kpis": _kpi_cards(owner, series, resolved, last_import),
         }
     )
     if not readings:
@@ -951,11 +990,11 @@ def build_metric_dashboard(owner, metric, params, today):
     if metric not in METRICS:
         return None
     parsed = parse_dashboard_params(params)
-    series = _history(owner)
-    resolved = resolve_range(parsed["range"], today, _first_date(series))
+    earliest = _first_date(owner)
+    resolved = resolve_range(parsed["range"], today, earliest)
     start = resolved["start"]
     end = resolved["end"]
-    points = _in_window(series.get(metric, []), start, end)
+    points = _in_window(_history(owner, (start, end)).get(metric, []), start, end)
     label = METRIC_LABELS.get(metric, metric)
     unit = METRICS[metric].unit
     chart = line_chart(
@@ -980,7 +1019,7 @@ def build_metric_dashboard(owner, metric, params, today):
         for point in reversed(points)
     ]
     return {
-        "has_data": bool(series),
+        "has_data": earliest is not None,
         "metric": metric,
         "metric_label": label,
         "unit": unit,

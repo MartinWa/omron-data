@@ -1,7 +1,6 @@
 import hmac
 import io
 from datetime import date, datetime, time, timedelta
-from itertools import pairwise
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -13,7 +12,8 @@ from django.core.management import call_command
 from django.core.management.base import CommandError
 from django.core.paginator import Paginator
 from django.db import transaction
-from django.db.models import Count, Max, Min, Prefetch, Q
+from django.db.models import Count, F, FloatField, Func, Max, Min, Prefetch, Q, Window
+from django.db.models.functions import Lag
 from django.http import Http404
 from django.shortcuts import redirect, render
 from django.utils import timezone
@@ -34,6 +34,7 @@ from .tokens import issue
 PAGE_SIZE = 25
 IMPORTS_PAGE_SIZE = 25
 WARNING_ROW_LIMIT = 10
+PREVIEW_READING_LIMIT = 500
 PENDING_IMPORT_KEY = "pending_import"
 TOO_LARGE_MESSAGE = (
     f"CSV export must be {MAX_UPLOAD_MEGABYTES} MB or smaller. Choose a smaller file."
@@ -50,6 +51,8 @@ PURGE_UNCONFIRMED_MESSAGE = "Tick the confirmation box to purge an import run."
 UNKNOWN_METRIC_MESSAGE = "That metric is not available."
 
 COMPONENT_ORDER = {code: index for index, code in enumerate(COMPONENTS)}
+GAP_DAYS = GAP.total_seconds() / 86400
+GAP_SLACK = 0.000001
 
 
 def _zone() -> ZoneInfo:
@@ -266,7 +269,7 @@ def _preview_summary(report: dict, readings, file_name: str) -> dict:
                 "unit": _unit(reading.metric),
                 "value": _decimal_text(reading.value),
             }
-            for reading in ordered
+            for reading in ordered[:PREVIEW_READING_LIMIT]
         ],
         "conflicts": [
             {
@@ -453,41 +456,59 @@ def _span_text(delta: timedelta) -> str:
     return f"{delta.days}d {delta.seconds // 3600}h"
 
 
-def _coverage(owner) -> dict:
-    metrics: list[dict] = []
-    for metric in (
+def _julian_days(value):
+    return Func(value, function="julianday", output_field=FloatField())
+
+
+def _gap_candidates(owner):
+    moments = (
         Measurement.objects.filter(owner=owner)
-        .values_list("metric", flat=True)
-        .distinct()
+        .order_by()
+        .annotate(previous=Window(expression=Lag("at"), partition_by="metric", order_by="at"))
+    )
+    return (
+        moments.filter(previous__isnull=False)
+        .annotate(apart=_julian_days(F("at")) - _julian_days(F("previous")))
+        .filter(apart__gt=GAP_DAYS - GAP_SLACK)
+        .values_list("metric", "previous", "at")
+    )
+
+
+def _gaps(owner):
+    gaps: dict[str, list[dict]] = {}
+    candidates = sorted(_gap_candidates(owner), key=lambda row: (row[0], row[2]))
+    for metric, before, after in candidates:
+        if after - before > GAP:
+            gaps.setdefault(metric, []).append(
+                {"before": before, "after": after, "span": _span_text(after - before)}
+            )
+    return gaps
+
+
+def _coverage(owner) -> dict:
+    gaps = _gaps(owner)
+    metrics = [
+        {
+            "metric": row["metric"],
+            "label": _label(row["metric"]),
+            "count": row["count"],
+            "first": row["first"],
+            "last": row["last"],
+            "gaps": gaps.get(row["metric"], []),
+        }
+        for row in Measurement.objects.filter(owner=owner)
+        .values("metric")
+        .annotate(count=Count("id"), first=Min("at"), last=Max("at"))
         .order_by("metric")
-    ):
-        moments = list(
-            Measurement.objects.filter(owner=owner, metric=metric)
-            .order_by("at")
-            .values_list("at", flat=True)
-        )
-        metrics.append(
-            {
-                "label": _label(metric),
-                "count": len(moments),
-                "first": moments[0],
-                "last": moments[-1],
-                "gaps": [
-                    {"before": before, "after": after, "span": _span_text(after - before)}
-                    for before, after in pairwise(moments)
-                    if after - before > GAP
-                ],
-            }
-        )
-    bounds = Measurement.objects.filter(owner=owner).aggregate(first=Min("at"), last=Max("at"))
+    ]
     return {
-        "readings": Measurement.objects.filter(owner=owner).exclude(metric=PANEL).count(),
+        "readings": sum(row["count"] for row in metrics if row["metric"] != PANEL),
         "events": Measurement.objects.filter(owner=owner, parent__isnull=True)
         .values("at")
         .distinct()
         .count(),
-        "first": bounds["first"],
-        "last": bounds["last"],
+        "first": min((row["first"] for row in metrics), default=None),
+        "last": max((row["last"] for row in metrics), default=None),
         "metrics": metrics,
         "gap_days": GAP.days,
         "gaps": sum(len(row["gaps"]) for row in metrics),

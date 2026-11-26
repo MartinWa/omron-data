@@ -16,10 +16,17 @@ from django.urls import reverse
 from django.utils import timezone
 
 from records.models import METRICS, PANEL, ImportRun, Measurement
-from records.reports import RANGE_KEYS, build_dashboards, build_metric_dashboard
+from records.reports import (
+    RANGE_KEYS,
+    _fetch_window,
+    _history,
+    build_dashboards,
+    build_metric_dashboard,
+)
 
 SPAN = 60
 STEP = 3
+CSRF = re.compile(rb'name="csrfmiddlewaretoken" value="[^"]*"')
 COORDINATES = re.compile(r'(?:x|y|width|height|cx|cy|dx|dy|points)="([^"]*)"')
 SVG_OPEN = re.compile(r"<svg[^>]*>")
 DELTA = re.compile(
@@ -469,6 +476,41 @@ def test_another_owners_data_never_appears(client, owner):
     assert "72.5" not in content_of(drill)
     assert body_response.context["readings_total"] == 1
     assert [row["metric"] for row in body_response.context["extremes"]] == ["pulse"]
+
+
+@pytest.mark.django_db
+def test_readings_outside_the_range_do_not_add_a_single_query(signed_in, owner):
+    with CaptureQueriesContext(connection) as captured:
+        before = signed_in.get(reverse("dashboards"), {"range": "30d"})
+    queries = len(captured.captured_queries)
+
+    old = moment(timezone.localdate() - timedelta(days=1500))
+    Measurement.objects.bulk_create(
+        [
+            measurement(owner, metric, old + timedelta(days=day, hours=hour), value)
+            for day in range(100)
+            for hour, (metric, value) in enumerate(
+                (
+                    ("body_weight", 90.5),
+                    ("body_fat_pct", 25.5),
+                    ("systolic_bp", 150),
+                    ("diastolic_bp", 95),
+                )
+            )
+        ]
+    )
+
+    with CaptureQueriesContext(connection) as captured:
+        after = signed_in.get(reverse("dashboards"), {"range": "30d"})
+
+    assert len(captured.captured_queries) == queries
+    assert after.context["readings_total"] == before.context["readings_total"]
+    assert after.context["kpis"] == before.context["kpis"]
+    assert after.context["range"]["start"] == before.context["range"]["start"]
+    assert CSRF.sub(b"", after.content) == CSRF.sub(b"", before.content)
+
+    series = _history(owner, _fetch_window(after.context["range"]))
+    assert sum(len(points) for points in series.values()) < 400
 
 
 def test_the_page_stays_under_forty_queries(signed_in):
