@@ -5,6 +5,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 PASSTHROUGH = ("OMRON_SECRET_KEY", "OMRON_ALLOWED_HOSTS", "OMRON_TIME_ZONE")
+COMPOSE_ONLY = frozenset({"OMRON_IMAGE", "OMRON_HOST_PORT", "OMRON_NETWORK"})
 ENTRY = re.compile(r"^\s+-\s+(\S+)\s*$")
 
 
@@ -27,7 +28,7 @@ def entries() -> list[str]:
 def documented() -> set[str]:
     text = (ROOT / ".env.example").read_text(encoding="utf-8")
     names = {line.split("=", 1)[0].strip() for line in text.splitlines() if line.strip()}
-    return {name for name in names if name.startswith("OMRON_")}
+    return {name for name in names if name.startswith("OMRON_")} - COMPOSE_ONLY
 
 
 def test_compose_passes_the_time_zone_to_the_container():
