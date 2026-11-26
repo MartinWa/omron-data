@@ -139,6 +139,13 @@ def sort_query(keys, default):
     )
 
 
+def metric_query():
+    return StrictQuery(
+        None,
+        description="Restrict to one metric code from /api/v1/metrics.",
+    )
+
+
 def parse_sort(value, allowed, default):
     value = value or default
     descending = value.startswith("-")

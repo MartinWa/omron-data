@@ -9,6 +9,7 @@ from pydantic.json_schema import models_json_schema
 
 from .auth import ApiTokenAuth
 from .contract import CONTRACT_VERSION, STATUS_CODES, ApiError, error_response
+from .models import METRICS
 from .schemas import ErrorOut
 
 logger = logging.getLogger("django")
@@ -34,10 +35,20 @@ def _document_error_responses(schema):
                 responses.setdefault(status, {"description": description, "content": content})
 
 
+def _document_metric_enum(schema):
+    codes = sorted(METRICS)
+    for methods in schema.get("paths", {}).values():
+        for operation in methods.values():
+            for parameter in operation.get("parameters", []):
+                if parameter.get("name") == "metric":
+                    parameter.setdefault("schema", {})["enum"] = codes
+
+
 class DocumentedNinjaAPI(NinjaAPI):
     def get_openapi_schema(self, *, path_prefix=None, path_params=None):
         schema = super().get_openapi_schema(path_prefix=path_prefix, path_params=path_params)
         _document_error_responses(schema)
+        _document_metric_enum(schema)
         return schema
 
 
