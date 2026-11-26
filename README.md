@@ -17,15 +17,23 @@ one history per person, and reads it back over a token-authenticated API.
 
 ## What it imports
 
-Blood pressure rows: `systolic_bp`, `diastolic_bp`, `pulse`, plus the report's last column
-(the app writes `AFib` there, kept as a note on the panel).
+Blood pressure rows: `systolic_bp`, `diastolic_bp`, `pulse`, plus the note the app writes
+(`AFib` lands in `Mätläge`; `Anmärkningar` is read when it has text), kept on the panel.
 
 Body composition rows: `body_weight`, `bmi`, `body_fat_pct`, `skeletal_muscle_pct`,
-`visceral_fat`, `resting_metabolism`, `impedance`, `fat_free_mass`. Fields the app leaves as
-`-` are not stored.
+`visceral_fat`, `resting_metabolism`, `impedance`, `fat_free_mass`, `body_water_pct`,
+`average_weight`, `average_fat_free_mass`, and body temperature when the export carries a
+temperature section. Fields the app leaves as `-` are not stored.
 
-Reports are read in the app's Swedish locale: `25 nov. 2026` dates, decimal commas, one
-header per section, several sections per file.
+A file holds several sections, each with its own header, and they do not spell the same
+thing the same way: `Kroppsfett (%)` and `Kroppsfett–procent` are one measurement, and the
+same reading appears in two sections of the same file. Sections are identified from their
+header, columns are mapped by name, and both body sections collapse onto one reading per
+timestamp. Weight is read in kilograms, falling back to pounds when only pounds are present.
+
+Reports are read in the app's Swedish locale: `25 nov. 2026` dates, decimal commas, percent signs
+inside the values (`34,3%`). A file whose headers are all unrecognised is refused
+rather than imported as empty.
 
 ## Run it
 

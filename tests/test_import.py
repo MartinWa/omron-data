@@ -5,6 +5,7 @@ from io import StringIO
 import pytest
 from django.contrib.auth import get_user_model
 from django.core.management import call_command
+from django.core.management.base import CommandError
 from django.db import connection
 from django.test import Client
 from django.test.utils import CaptureQueriesContext
@@ -15,9 +16,7 @@ from records.management.commands.import_omron import stamp
 from records.models import ImportRun, Measurement
 from records.tokens import issue
 
-HEADER = (
-    "Datum,Tid,Systoliskt tryck (mmHg),Diastoliskt tryck (mmHg),Puls (slag/min),Anmärkningar,Måläge"
-)
+HEADER = "Datum,Tid,Systoliskt tryck (mmHg),Diastoliskt tryck (mmHg),Puls (slag/min),Anmärkningar,Mätläge"
 
 
 def report(*rows: str) -> str:
@@ -296,4 +295,14 @@ def test_command_parse_failure_leaves_no_run_and_no_readings(owner, tmp_path):
         call_command("import_omron", str(tmp_path), "--owner", "alice", stdout=StringIO())
 
     assert ImportRun.objects.filter(owner=owner).count() == 0
+    assert Measurement.objects.filter(owner=owner).count() == 0
+
+
+def test_command_reports_an_unrecognised_export(owner, tmp_path):
+    header = "Datum,Tid,Ok\u00e4nd kolumn"
+    (tmp_path / "export.csv").write_text(f"{header}\r\n04 juli 2024,10:31,7\r\n", encoding="utf-8")
+
+    with pytest.raises(CommandError, match="export.csv: report has header rows"):
+        call_command("import_omron", str(tmp_path), "--owner", "alice", stdout=StringIO())
+
     assert Measurement.objects.filter(owner=owner).count() == 0

@@ -5,6 +5,7 @@ from django.contrib.auth import get_user_model
 from django.core.management.base import BaseCommand, CommandError
 from django.utils import timezone
 
+from parsing.report import UnknownReportError
 from records.importer import COUNTS, import_report
 
 LABELS = {
@@ -63,9 +64,12 @@ class Command(BaseCommand):
         readings_total = 0
         owner = self._owner(options)
         for path in files:
-            report = import_report(
-                owner, path, overwrite=options["overwrite"], dry_run=options["dry_run"]
-            )
+            try:
+                report = import_report(
+                    owner, path, overwrite=options["overwrite"], dry_run=options["dry_run"]
+                )
+            except UnknownReportError as error:
+                raise CommandError(f"{path.name}: {error}") from error
             readings_total += report["readings"]
             for field in COUNTS:
                 total[field] += report[field]

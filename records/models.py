@@ -21,10 +21,14 @@ METRICS = {
         Metric("bmi", ""),
         Metric("body_fat_pct", "%"),
         Metric("skeletal_muscle_pct", "%"),
+        Metric("body_water_pct", "%"),
         Metric("visceral_fat", ""),
         Metric("resting_metabolism", "kcal"),
         Metric("impedance", "ohm"),
         Metric("fat_free_mass", "kg"),
+        Metric("average_weight", "kg"),
+        Metric("average_fat_free_mass", "kg"),
+        Metric("body_temperature", "°C"),
     )
 }
 

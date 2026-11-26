@@ -47,7 +47,7 @@ def test_successful_run_records_counts_and_span(owner, tmp_path):
 
 
 def test_empty_file_records_a_run_without_a_span(owner, tmp_path):
-    path = write(tmp_path / "empty.csv", "nothing here\n")
+    path = write(tmp_path / "empty.csv", "")
 
     result = import_report(owner, path)
 
