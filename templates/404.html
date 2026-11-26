@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block title %}Not found — omron-data{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>Page not found</h1>
+  <p class="lede">That address does not match anything in this installation.</p>
+</div>
+
+<div class="empty">
+  {% if user.is_authenticated %}
+  <p>Check the link, or start from your readings.</p>
+  <a class="btn btn-primary" href="{% url 'readings' %}">Go to readings</a>
+  {% else %}
+  <p>Check the link, or log in to continue.</p>
+  <a class="btn btn-primary" href="{% url 'login' %}">Log in</a>
+  {% endif %}
+</div>
+{% endblock %}

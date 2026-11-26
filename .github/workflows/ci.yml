@@ -1,0 +1,143 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+  schedule:
+    - cron: "23 6 * * 1"
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  UV_VERSION: "0.13.9"
+  DOCKER_BUILD_RECORD_UPLOAD: "false"
+
+jobs:
+  checks:
+    name: Checks (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.14"]
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up uv and Python
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: ${{ env.UV_VERSION }}
+          python-version: ${{ matrix.python-version }}
+          enable-cache: true
+      - name: Check the dependency lockfile
+        run: uv lock --check
+      - name: Install the locked environment
+        run: uv sync --locked
+      - name: Lint
+        run: uv run ruff check .
+      - name: Check formatting
+        run: uv run ruff format --check .
+      - name: Check the Django configuration
+        env:
+          OMRON_SECRET_KEY: synthetic-ci-setting-never-for-runtime-000000000000000000
+        run: uv run python manage.py check
+      - name: Check for model drift
+        env:
+          OMRON_SECRET_KEY: synthetic-ci-setting-never-for-runtime-000000000000000000
+        run: uv run python manage.py makemigrations --check --dry-run
+      - name: Scan for private data
+        run: uv run python tools/check_no_private_data.py
+      - name: Run the test suite
+        run: uv run pytest -q
+
+  compose:
+    name: Compose (Linux)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Validate the production stack and each overlay
+        env:
+          PROXY_NETWORK: proxy
+        run: |
+          docker compose config -q
+          docker compose -f compose.yaml -f compose.host-port.yaml config -q
+          docker compose -f compose.yaml -f compose.proxy-network.yaml config -q
+          docker compose -f compose.yaml -f compose.local-build.yaml config -q
+          docker compose -f compose.development.yaml config -q
+
+  startup:
+    name: Clean startup (Linux)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - name: Build the production image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          target: production
+          load: true
+          push: false
+          provenance: false
+          tags: omron-data:ci
+          no-cache: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+          cache-from: type=gha,scope=ci-production
+          cache-to: type=gha,scope=ci-production,mode=max
+          github-token: ""
+      - name: Start the image from an empty, writable data directory
+        env:
+          OMRON_SECRET_KEY: synthetic-ci-container-key-never-for-runtime-000000000000
+        run: |
+          data_directory="$RUNNER_TEMP/data"
+          rm -rf "$data_directory"
+          mkdir -p "$data_directory"
+          chmod 0777 "$data_directory"
+          docker run --detach --name omron-data-ci \
+            --read-only \
+            --tmpfs /tmp:size=67108864,mode=1777 \
+            --cap-drop ALL \
+            --security-opt no-new-privileges:true \
+            --volume "$data_directory:/app/data" \
+            --env OMRON_SECRET_KEY="$OMRON_SECRET_KEY" \
+            --env OMRON_ALLOWED_HOSTS=127.0.0.1 \
+            omron-data:ci
+          attempts=60
+          until docker exec omron-data-ci python tools/healthcheck.py; do
+            attempts=$((attempts - 1))
+            if [ "$attempts" -le 0 ]; then
+              echo "The container never became healthy."
+              docker logs omron-data-ci
+              exit 1
+            fi
+            sleep 2
+          done
+          docker exec omron-data-ci python manage.py migrate --check
+          docker exec omron-data-ci python tools/check_production.py
+      - name: Remove the probe container
+        if: always()
+        run: |
+          docker rm --force omron-data-ci || true
+          rm -rf "$RUNNER_TEMP/data"

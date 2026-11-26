@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% load assets %}
+{% block title %}Import a CSV export — omron-data{% endblock %}
+{% block scripts %}
+<script src="{% asset 'records/upload.js' %}" defer></script>
+{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>Import an OMRON connect CSV export</h1>
+  <p class="lede">Parse the export and review every count before anything is written to your account.</p>
+</div>
+
+<div class="card">
+  <form method="post" enctype="multipart/form-data" class="form"
+        data-upload-form
+        data-max-bytes="{{ max_upload_bytes }}"
+        data-too-large="{{ too_large_message }}">
+    {% csrf_token %}
+    <div class="dropzone" data-dropzone>
+      <p class="dropzone-hint">Drag a CSV export here, or choose a file below.</p>
+      {% include "partials/field.html" with field=form.csv_file force_invalid=too_large client_error=True %}
+    </div>
+    <noscript>
+      <div class="actions">
+        <button class="btn btn-primary" type="submit">Preview</button>
+      </div>
+    </noscript>
+  </form>
+
+  <details class="export-help">
+    <summary>How to export from OMRON connect</summary>
+    <ol>
+      <li>Open the OMRON connect app and pair your blood pressure monitor or scale.</li>
+      <li>Open <em>Settings</em>, then <em>Data export</em>; some versions label it <em>Export data</em> or <em>CSV export</em>.</li>
+      <li>Save the CSV file the app hands you, then choose that file above to see the preview.</li>
+    </ol>
+    <p>One file holds every reading the app has stored, up to {{ max_upload_megabytes }} MB.</p>
+    <p class="hint">Nothing is written until you confirm on the preview page.</p>
+  </details>
+</div>
+{% endblock %}

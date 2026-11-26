@@ -1,0 +1,101 @@
+{% extends "base.html" %}
+{% load assets %}
+{% block title %}{{ metric_label }} — Dashboards — omron-data{% endblock %}
+{% block scripts %}
+<script src="{% asset 'records/print.js' %}" defer></script>
+{% endblock %}
+{% block content %}
+<div class="page-head report-head">
+  <p class="report-back"><a href="{{ dashboards_url }}">← Dashboards</a></p>
+  <h1>{{ metric_label }}</h1>
+  {% if has_data %}
+  <p class="lede">{{ period_label }} · {{ readings_total }} reading{{ readings_total|pluralize }}{% if unit %} in {{ unit }}{% endif %}</p>
+  {% else %}
+  <p class="lede">One metric over time, its extremes and every reading behind them.</p>
+  {% endif %}
+</div>
+
+{% if not has_data %}
+<div class="empty">
+  <svg class="empty-icon" width="38" height="38" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M2 12.5h4l2-4.5 3 9 2.5-6 1.5 1.5H22"/></svg>
+  <p>No readings yet.</p>
+  <p class="small">Import an OMRON connect CSV export to see {{ metric_label|lower }} here.</p>
+  <a class="btn btn-primary" href="{% url 'import_upload' %}">Import a CSV export</a>
+</div>
+{% else %}
+
+<div class="report-toolbar filters">
+  <div class="report-toolbar-range">
+    <span class="segmented" role="group" aria-label="Date range">
+      {% for option in range_options %}
+      <a class="segmented-item{% if option.current %} is-current{% endif %}" href="{% querystring range=option.key %}"{% if option.current %} aria-current="true"{% endif %}>{{ option.label }}</a>
+      {% endfor %}
+    </span>
+  </div>
+  <div class="filters-actions">
+    <button class="btn btn-sm" type="button" onclick="window.print()">Print</button>
+  </div>
+</div>
+
+{% if range_empty %}
+<div class="notice report-notice">
+  <p>No {{ metric_label|lower }} readings in {{ period_label }}. <a href="{% querystring range='all' %}">Show all time</a></p>
+</div>
+{% else %}
+
+<section class="card report-card">
+  <div class="card-head">
+    <h2>{{ metric_label }}</h2>
+    <span class="muted small">{{ period_label }}</span>
+  </div>
+  <div class="chart-wrap">
+    {% include "partials/report_chart.html" with chart=chart %}
+  </div>
+  <details class="data-table" data-print-open>
+    <summary>Show the numbers</summary>
+    {% if hidden_rows %}
+    <p class="small muted">The {{ rows|length }} most recent of {{ readings_total }} readings in {{ period_label }}.</p>
+    {% endif %}
+    <div class="table-wrap">
+      <table class="table">
+        <caption class="visually-hidden">{{ metric_label }} per reading for {{ period_label }}</caption>
+        <thead>
+          <tr><th scope="col">Reading</th><th scope="col" class="num">Value</th><th scope="col">Unit</th><th scope="col">Note</th></tr>
+        </thead>
+        <tbody>
+          {% for row in rows %}
+          <tr><td>{{ row.date }}</td><td class="num">{{ row.value }}</td><td class="muted">{{ row.unit }}</td><td class="muted">{{ row.note }}</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </details>
+</section>
+
+<section class="card report-card">
+  <div class="card-head">
+    <h2>Extremes</h2>
+    <span class="muted small">In {{ period_label }}</span>
+  </div>
+  <ul class="record-list">
+    <li class="record-row">
+      <span class="record-name">Highest</span>
+      <span class="record-value">{{ extremes.high.value }} {{ unit }}</span>
+      <span class="record-detail muted small">{{ extremes.high.date }}</span>
+    </li>
+    <li class="record-row">
+      <span class="record-name">Lowest</span>
+      <span class="record-value">{{ extremes.low.value }} {{ unit }}</span>
+      <span class="record-detail muted small">{{ extremes.low.date }}</span>
+    </li>
+    <li class="record-row">
+      <span class="record-name">Latest</span>
+      <span class="record-value">{{ extremes.latest.value }} {{ unit }}</span>
+      <span class="record-detail muted small">{{ extremes.latest.date }}</span>
+    </li>
+  </ul>
+</section>
+
+{% endif %}
+{% endif %}
+{% endblock %}

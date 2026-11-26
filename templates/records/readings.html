@@ -1,0 +1,117 @@
+{% extends "base.html" %}
+{% load assets formatting %}
+{% block title %}Readings — omron-data{% endblock %}
+{% block scripts %}
+<script src="{% asset 'records/filters.js' %}" defer></script>
+<script src="{% asset 'records/print.js' %}" defer></script>
+{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>Readings</h1>
+  {% if has_data %}
+  <p class="lede">
+    {{ total_readings }} reading{{ total_readings|pluralize }} in {{ total_events }} event{{ total_events|pluralize }} stored for your account{% if filtered %}; {{ page.paginator.count }} event{{ page.paginator.count|pluralize }} match these filters{% endif %}.
+  </p>
+  {% endif %}
+</div>
+
+{% if has_data %}
+<form class="filters" method="get" action="{% url 'readings' %}" role="search" aria-label="Filter readings" data-filter-form>
+  <div class="filters-field">
+    <label for="filter-metric">Metric</label>
+    <select id="filter-metric" name="metric">
+      <option value="">All metrics</option>
+      {% for item in metrics %}
+      <option value="{{ item.code }}"{% if item.code == selected_metric %} selected{% endif %}>{{ item.label }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="filters-field">
+    <label for="filter-from">From</label>
+    <input id="filter-from" type="date" name="from" value="{{ date_from }}">
+  </div>
+  <div class="filters-field">
+    <label for="filter-to">To</label>
+    <input id="filter-to" type="date" name="to" value="{{ date_to }}">
+  </div>
+  <div class="filters-field filters-search">
+    <label for="filter-q">Search</label>
+    <input id="filter-q" type="search" name="q" value="{{ query }}" placeholder="Note">
+  </div>
+  <div class="filters-actions">
+    <button class="btn btn-primary btn-sm" type="submit">Filter</button>
+    <a class="btn btn-sm" href="{% url 'readings' %}">Clear</a>
+  </div>
+</form>
+{% endif %}
+
+{% if not page.paginator.count %}
+<div class="empty">
+  {% if has_data %}
+  <svg class="empty-icon" width="38" height="38" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/></svg>
+  <p>No readings match these filters.</p>
+  <a class="btn" href="{% url 'readings' %}">Clear filters</a>
+  {% else %}
+  <svg class="empty-icon" width="38" height="38" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M2 12.5h4l2-4.5 3 9 2.5-6 1.5 1.5H22"/></svg>
+  <p>No readings yet.</p>
+  <p class="small">
+    Import an OMRON connect CSV export with
+    <code>uv run python manage.py import_omron export.csv --owner {{ user.get_username }}</code>.
+  </p>
+  <a class="btn btn-primary" href="{% url 'imports' %}">Import a CSV export</a>
+  {% endif %}
+</div>
+{% endif %}
+
+{% for event in events %}
+<details class="card session" data-print-open>
+  <summary class="session-head">
+    <span class="session-heading">
+      <span class="session-date"><time datetime="{{ event.at|date:'c' }}">{{ event.at|isodate }}</time></span>
+      <span class="session-title">{{ event.title }}</span>
+      {% if event.note %}<span class="meta">{{ event.note }}</span>{% endif %}
+    </span>
+    <span class="session-stats">
+      {% for badge in event.badges %}
+      <span class="badge">{{ badge }}</span>
+      {% endfor %}
+    </span>
+  </summary>
+  <div class="table-wrap">
+    <table class="table">
+      <caption class="visually-hidden">{{ event.title }} on {{ event.at|isodate }}: {{ event.count }} reading{{ event.count|pluralize }}</caption>
+      <thead>
+        <tr>
+          <th scope="col">Metric</th>
+          <th scope="col" class="num">Value</th>
+          <th scope="col">Unit</th>
+          <th scope="col">Note</th>
+        </tr>
+      </thead>
+      {% for group in event.groups %}
+      <tbody>
+        <tr class="set-group">
+          <th scope="rowgroup" colspan="4">
+            {{ group.label }}
+            <span class="set-group-count">{{ group.count }} reading{{ group.count|pluralize }}</span>
+          </th>
+        </tr>
+        {% for row in group.rows %}
+        <tr>
+          <td>{{ row.label }}</td>
+          <td class="num">{{ row.value|num }}</td>
+          <td class="muted">{{ row.unit }}</td>
+          <td class="muted">{{ row.note }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+      {% endfor %}
+    </table>
+  </div>
+</details>
+{% endfor %}
+
+{% if page.has_other_pages %}
+{% include "partials/pager.html" %}
+{% endif %}
+{% endblock %}

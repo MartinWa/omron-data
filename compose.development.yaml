@@ -1,0 +1,24 @@
+# Windows remains the source/editing host; the code is bind mounted read from it.
+name: omron-data-development
+services:
+  web:
+    build:
+      context: .
+      target: development
+    image: omron-data:development
+    init: true
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - type: bind
+        source: .
+        target: /app
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

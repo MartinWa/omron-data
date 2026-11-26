@@ -1,0 +1,164 @@
+{% extends "base.html" %}
+{% load formatting %}
+{% block title %}API tokens — omron-data{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>API tokens</h1>
+  <p class="lede">The JSON API is read-only and authenticated with a bearer token. Only a hash and an 8-character prefix are stored.</p>
+</div>
+
+{% if secret %}
+<div class="secret" role="status" aria-live="polite" tabindex="-1">
+  <p class="secret-label">Secret{% if created_name %} for {{ created_name }}{% endif %} — shown only once</p>
+  <div class="secret-row">
+    <code id="token-secret">{{ secret }}</code>
+    <button class="btn btn-sm" type="button" data-copy="#token-secret">Copy</button>
+  </div>
+  <p class="hint">Copy it now. It cannot be recovered; replace a lost secret with a new token.</p>
+</div>
+{% endif %}
+
+<div class="card">
+  <div class="card-head">
+    <h2>Your tokens</h2>
+    <span class="badge">{{ tokens|length }}</span>
+  </div>
+  {% if not tokens %}
+  <p class="muted">No tokens yet. Create one below to read your data over the API.</p>
+  {% else %}
+  <div class="table-wrap">
+    <table class="table table-cards">
+      <thead>
+        <tr>
+          <th scope="col">Name</th>
+          <th scope="col">Prefix</th>
+          <th scope="col">Created</th>
+          <th scope="col">Status</th>
+          <th scope="col" class="tight">Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for token in tokens %}
+        <tr>
+          <td data-label="Name">{{ token.name }}</td>
+          <td data-label="Prefix"><code>{{ token.prefix }}…</code></td>
+          <td data-label="Created" class="muted">{{ token.created_at|isodate:"day" }}</td>
+          <td data-label="Status">
+            {% if token.revoked %}
+            <span class="badge badge-danger">revoked</span>
+            {% else %}
+            <span class="badge badge-success">active</span>
+            {% endif %}
+          </td>
+          <td class="tight" data-actions>
+            <div class="row-confirm" data-row-confirm>
+              {% if token.revoked %}
+              <a class="btn btn-sm btn-danger" href="?confirm={{ token.pk }}" data-row-start>Delete</a>
+              <form method="post" action="{% url 'delete_token' token.pk %}" data-row-form{% if request.GET.confirm != token.pk|stringformat:"s" %} hidden{% endif %}>
+                {% csrf_token %}
+                <p class="small" id="delete-warning-{{ token.pk }}">Removes {{ token.name }} permanently; the name becomes available again.</p>
+                <button class="btn btn-sm btn-danger" type="submit" aria-describedby="delete-warning-{{ token.pk }}">Delete token</button>
+                <a class="btn btn-sm btn-ghost" href="{% url 'tokens' %}" data-row-cancel>Cancel</a>
+              </form>
+              {% else %}
+              <a class="btn btn-sm btn-danger" href="?confirm={{ token.pk }}" data-row-start>Revoke</a>
+              <form method="post" action="{% url 'revoke_token' token.pk %}" data-row-form{% if request.GET.confirm != token.pk|stringformat:"s" %} hidden{% endif %}>
+                {% csrf_token %}
+                <p class="small" id="revoke-warning-{{ token.pk }}">Clients using {{ token.name }} stop working immediately.</p>
+                <button class="btn btn-sm btn-danger" type="submit" aria-describedby="revoke-warning-{{ token.pk }}">Revoke token</button>
+                <a class="btn btn-sm btn-ghost" href="{% url 'tokens' %}" data-row-cancel>Cancel</a>
+              </form>
+              {% endif %}
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+</div>
+
+<div class="card">
+  <div class="card-head">
+    <h2>Create a token</h2>
+  </div>
+  <form method="post" class="form">
+    {% csrf_token %}
+    {% include "partials/field.html" with field=form.name %}
+    <div class="actions">
+      <button class="btn btn-primary" type="submit">Create</button>
+    </div>
+  </form>
+</div>
+
+<script>
+(function () {
+  document.querySelectorAll("[data-row-confirm]").forEach(function (zone) {
+    var start = zone.querySelector("[data-row-start]");
+    var form = zone.querySelector("[data-row-form]");
+    var cancel = zone.querySelector("[data-row-cancel]");
+    if (!start || !form) return;
+    start.addEventListener("click", function (event) {
+      event.preventDefault();
+      start.hidden = true;
+      form.hidden = false;
+      var submit = form.querySelector('button[type="submit"]');
+      if (submit) submit.focus();
+    });
+    if (cancel) {
+      cancel.addEventListener("click", function (event) {
+        event.preventDefault();
+        form.hidden = true;
+        start.hidden = false;
+        start.focus();
+      });
+    }
+    if (!form.hidden) start.hidden = true;
+  });
+
+  function copyText(text) {
+    if (window.isSecureContext && navigator.clipboard) {
+      return navigator.clipboard.writeText(text);
+    }
+    return new Promise(function (resolve, reject) {
+      var field = document.createElement("textarea");
+      field.value = text;
+      field.setAttribute("readonly", "");
+      field.style.position = "fixed";
+      field.style.top = "-1000px";
+      document.body.appendChild(field);
+      field.select();
+      var copied = false;
+      try {
+        copied = document.execCommand("copy");
+      } catch (error) {
+        copied = false;
+      }
+      document.body.removeChild(field);
+      if (copied) resolve();
+      else reject();
+    });
+  }
+
+  document.querySelectorAll("[data-copy]").forEach(function (button) {
+    button.addEventListener("click", function () {
+      var target = document.querySelector(button.dataset.copy);
+      if (!target) return;
+      copyText(target.textContent.trim()).then(function () {
+        button.textContent = "Copied";
+        setTimeout(function () { button.textContent = "Copy"; }, 1500);
+      }).catch(function () {
+        var selection = window.getSelection();
+        if (selection) selection.selectAllChildren(target);
+        button.textContent = "Press Ctrl+C";
+        setTimeout(function () { button.textContent = "Copy"; }, 4000);
+      });
+    });
+  });
+
+  var secretBox = document.querySelector(".secret");
+  if (secretBox) secretBox.focus();
+})();
+</script>
+{% endblock %}

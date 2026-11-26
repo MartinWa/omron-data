@@ -1,0 +1,32 @@
+# Installation-specific values come from a private .env file or the shell.
+services:
+  web:
+    image: "${OMRON_IMAGE:-ghcr.io/martinwa/omron-data:latest}"
+    user: "${PUID:-1000}:${PGID:-1000}"
+    environment:
+      - OMRON_SECRET_KEY
+      - OMRON_SECRET_KEY_FILE
+      - OMRON_ALLOWED_HOSTS
+      - OMRON_CSRF_TRUSTED_ORIGINS
+      - OMRON_TIME_ZONE
+      - OMRON_TRUSTED_PROXY
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 30s
+    read_only: true
+    tmpfs:
+      - /tmp:size=67108864,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+networks:
+  default:
+    name: "${OMRON_NETWORK:-omron-data}"
