@@ -291,9 +291,20 @@ the previous tag and restore the database backup together, because a newer schem
 already have been applied.
 
 Staged uploads written before this version carry no `.omron-data-pending` marker file, and
-cleanup only deletes folders it can prove it created. After upgrading, remove the leftover
-subdirectories of `omron-data-pending/` — inside `OMRON_PENDING_DIR`, or the system temp
-directory when that is unset — that hold no marker file. Nothing else needs attention.
+cleanup only deletes folders it can prove it created, so the old ones survive an upgrade.
+Where they are depends on how this instance was configured:
+
+- With `OMRON_PENDING_DIR` set, the old code treated that directory as the staging root, so
+  each import got a subdirectory directly inside it: `OMRON_PENDING_DIR/<id>/`, holding the
+  export and its `summary.json` and carrying no marker file. Imports since the upgrade are
+  one level deeper, in `OMRON_PENDING_DIR/omron-data-pending/<id>/`, and are still tracked,
+  so remove only the marker-less subdirectories sitting directly in `OMRON_PENDING_DIR` and
+  leave `omron-data-pending/` alone while an upload is waiting to be confirmed.
+- With it unset, the old and the current code both use `omron-data-pending/` under the
+  system temp directory, so the marker-less subdirectories to remove there are one level
+  further down, inside `omron-data-pending/`.
+
+Nothing else needs attention.
 
 ## Ownership
 
