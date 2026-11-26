@@ -39,15 +39,24 @@ rather than imported as empty.
 
 ```sh
 uv sync
+export OMRON_SECRET_KEY="$(python -c 'import secrets; print(secrets.token_urlsafe(48))')"
 uv run python manage.py migrate
 uv run python manage.py import_omron /path/to/exports --owner alice --create-user --dry-run
 uv run python manage.py make_token --owner alice --name laptop
+uv run python manage.py collectstatic --noinput
 uv run waitress-serve --port 8000 omron_data.wsgi:application
 ```
 
-Set `OMRON_SECRET_KEY` and `OMRON_ALLOWED_HOSTS` in the environment; `OMRON_DB_PATH`
-overrides the database location (default `.data/db.sqlite3`) and `OMRON_TIME_ZONE` sets the
-zone the export's wall clocks are read in (default `Europe/Stockholm`).
+`collectstatic` is what puts the stylesheet and the scripts where the server looks for them:
+without it the pages render unstyled. WhiteNoise serves them from `staticfiles/`
+(`OMRON_STATIC_ROOT` overrides the location), and it reads the directory once at startup, so
+re-run `collectstatic` and restart after changing an asset.
+
+`OMRON_SECRET_KEY` has no default outside `OMRON_DEBUG=1`: a container that forgot it
+refuses to start instead of serving with a published key. Set `OMRON_ALLOWED_HOSTS` too;
+`OMRON_DB_PATH` overrides the database location (default `.data/db.sqlite3`) and
+`OMRON_TIME_ZONE` sets the zone the export's wall clocks are read in (default
+`Europe/Stockholm`).
 
 ## API
 
