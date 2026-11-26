@@ -14,6 +14,7 @@ from django.core.management.base import CommandError
 from django.core.paginator import Paginator
 from django.db import transaction
 from django.db.models import Count, Max, Min, Prefetch, Q
+from django.http import Http404
 from django.shortcuts import redirect, render
 from django.utils import timezone
 from django.views.decorators.http import require_POST
@@ -26,6 +27,7 @@ from .limits import MAX_REQUEST_BODY_BYTES, MAX_UPLOAD_BYTES, MAX_UPLOAD_MEGABYT
 from .management.commands.coverage import GAP
 from .management.commands.import_omron import LABELS
 from .models import COMPONENTS, METRICS, PANEL, ApiToken, ImportRun, Measurement
+from .reports import METRIC_LABELS, build_dashboards, build_metric_dashboard
 from .templatetags.formatting import num
 from .tokens import issue
 
@@ -45,25 +47,7 @@ PREVIEW_EXPIRED_MESSAGE = "This preview expired. Upload the CSV again."
 PREVIEW_CANCELLED_MESSAGE = "Preview discarded. Nothing was imported."
 RUN_NOT_FOUND_MESSAGE = "That import run was not found."
 PURGE_UNCONFIRMED_MESSAGE = "Tick the confirmation box to purge an import run."
-
-METRIC_LABELS = {
-    "blood_pressure": "Blood pressure",
-    "systolic_bp": "Systolic",
-    "diastolic_bp": "Diastolic",
-    "pulse": "Pulse",
-    "body_weight": "Weight",
-    "bmi": "BMI",
-    "body_fat_pct": "Body fat",
-    "skeletal_muscle_pct": "Skeletal muscle",
-    "body_water_pct": "Body water",
-    "visceral_fat": "Visceral fat",
-    "resting_metabolism": "Resting metabolism",
-    "impedance": "Impedance",
-    "fat_free_mass": "Fat-free mass",
-    "average_weight": "Average weight",
-    "average_fat_free_mass": "Average fat-free mass",
-    "body_temperature": "Body temperature",
-}
+UNKNOWN_METRIC_MESSAGE = "That metric is not available."
 
 COMPONENT_ORDER = {code: index for index, code in enumerate(COMPONENTS)}
 
@@ -225,6 +209,23 @@ def readings(request):
             "date_to": date_to.isoformat() if date_to else "",
         },
     )
+
+
+@login_required
+def dashboards(request):
+    return render(
+        request,
+        "records/dashboards.html",
+        build_dashboards(request.user, request.GET, timezone.localdate()),
+    )
+
+
+@login_required
+def dashboard_metric(request, metric):
+    context = build_metric_dashboard(request.user, metric, request.GET, timezone.localdate())
+    if context is None:
+        raise Http404(UNKNOWN_METRIC_MESSAGE)
+    return render(request, "records/dashboard_metric.html", context)
 
 
 def _stamp(at: datetime) -> str:

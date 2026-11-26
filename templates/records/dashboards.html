@@ -1,0 +1,269 @@
+{% extends "base.html" %}
+{% load assets formatting %}
+{% block title %}Dashboards — omron-data{% endblock %}
+{% block scripts %}
+<script src="{% asset 'records/print.js' %}" defer></script>
+{% endblock %}
+{% block content %}
+<div class="page-head report-head">
+  <h1>Dashboards</h1>
+  {% if has_data %}
+  <p class="lede">{{ period_label }} · {{ readings_total }} reading{{ readings_total|pluralize }}{% if last_import %} · last import {{ last_import|isodate }}{% endif %}</p>
+  {% else %}
+  <p class="lede">Blood pressure, weight, body composition and consistency from your imported readings.</p>
+  {% endif %}
+</div>
+
+{% if not has_data %}
+<div class="empty">
+  <svg class="empty-icon" width="38" height="38" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M2 12.5h4l2-4.5 3 9 2.5-6 1.5 1.5H22"/></svg>
+  <p>No readings yet.</p>
+  <p class="small">Import an OMRON connect CSV export to see blood pressure, weight and composition charts here.</p>
+  <a class="btn btn-primary" href="{% url 'import_upload' %}">Import a CSV export</a>
+</div>
+{% else %}
+
+<div class="report-toolbar filters">
+  <div class="report-toolbar-range">
+    <span class="segmented" role="group" aria-label="Date range">
+      {% for option in range_options %}
+      <a class="segmented-item{% if option.current %} is-current{% endif %}" href="{% querystring range=option.key %}"{% if option.current %} aria-current="true"{% endif %}>{{ option.label }}</a>
+      {% endfor %}
+    </span>
+  </div>
+  <div class="filters-actions">
+    <button class="btn btn-sm" type="button" onclick="window.print()">Print</button>
+  </div>
+</div>
+
+{% if range_empty %}
+<div class="notice report-notice">
+  <p>No readings in {{ period_label }}. <a href="{% querystring range='all' %}">Show all time</a></p>
+</div>
+{% else %}
+
+<div class="stat-grid report-kpis">
+  {% for card in kpis %}
+  <div class="stat">
+    <span class="stat-label">{{ card.label }}</span>
+    <span class="stat-value">{{ card.value }}</span>
+    {% if card.delta %}
+    <span class="delta delta-{{ card.delta.class }}">
+      <span aria-hidden="true">{{ card.delta.text }}</span>
+      <span class="visually-hidden">{{ card.delta.aria }}</span>
+    </span>
+    {% endif %}
+  </div>
+  {% endfor %}
+</div>
+
+<section class="card report-card">
+  <div class="card-head">
+    <h2>Blood pressure</h2>
+    <span class="muted small">Systolic, diastolic and pulse</span>
+  </div>
+  {% if blood_pressure.has_points %}
+  <div class="chart-wrap">
+    {% include "partials/report_chart.html" with chart=blood_pressure.chart %}
+  </div>
+  <ul class="chart-legend">
+    {% for line in blood_pressure.legend %}
+    <li><span class="legend-swatch {{ line.class }}"></span>{{ line.label }} ({{ line.unit }})</li>
+    {% endfor %}
+  </ul>
+  <p class="chart-note">All three series share one axis: mmHg for systolic and diastolic, beats per minute for pulse.</p>
+  <details class="data-table" data-print-open>
+    <summary>Show the numbers</summary>
+    <div class="table-wrap">
+      <table class="table">
+        <caption class="visually-hidden">Systolic, diastolic and pulse per reading for {{ period_label }}</caption>
+        <thead>
+          <tr><th scope="col">Reading</th><th scope="col" class="num">Systolic</th><th scope="col" class="num">Diastolic</th><th scope="col" class="num">Pulse</th></tr>
+        </thead>
+        <tbody>
+          {% for row in blood_pressure.rows %}
+          <tr><td>{{ row.date }}</td><td class="num">{{ row.systolic }}</td><td class="num">{{ row.diastolic }}</td><td class="num">{{ row.pulse }}</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </details>
+  {% else %}
+  <p class="muted">No blood pressure readings in {{ period_label }}.</p>
+  {% endif %}
+</section>
+
+<div class="report-grid">
+  <section class="card report-card">
+    <div class="card-head">
+      <h2>Weight</h2>
+      <span class="muted small">Weekly mean</span>
+    </div>
+    {% if weight.has_points %}
+    <div class="chart-wrap">
+      {% include "partials/report_chart.html" with chart=weight.chart %}
+    </div>
+    {% if weight.has_line %}
+    <p class="chart-note">Line: {{ weight.window }}-week moving average. Shaded bar: a week still in progress.</p>
+    {% endif %}
+    <details class="data-table" data-print-open>
+      <summary>Show the numbers</summary>
+      <div class="table-wrap">
+        <table class="table">
+          <caption class="visually-hidden">Weight per week for {{ period_label }}</caption>
+          <thead>
+            <tr><th scope="col">Period</th><th scope="col" class="num">Weight</th><th scope="col">Note</th></tr>
+          </thead>
+          <tbody>
+            {% for row in weight.rows %}
+            <tr><td>{{ row.date }}</td><td class="num">{{ row.text }}</td><td class="muted">{{ row.note|default:"—" }}</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </details>
+    {% else %}
+    <p class="muted">No weight readings in {{ period_label }}.</p>
+    {% endif %}
+  </section>
+
+  <section class="card report-card">
+    <div class="card-head">
+      <h2>Body composition</h2>
+      <span class="segmented segmented-sm" role="group" aria-label="Body composition metric">
+        {% for option in metric_options %}
+        <a class="segmented-item{% if option.current %} is-current{% endif %}" href="{% querystring metric=option.key %}"{% if option.current %} aria-current="true"{% endif %}>{{ option.label }}</a>
+        {% endfor %}
+      </span>
+    </div>
+    {% if composition.has_points %}
+    <div class="chart-wrap">
+      {% include "partials/report_chart.html" with chart=composition.chart %}
+    </div>
+    <p class="chart-note">{{ composition.label }} only, so a percentage never shares an axis with a kilogram.</p>
+    <details class="data-table" data-print-open>
+      <summary>Show the numbers</summary>
+      <div class="table-wrap">
+        <table class="table">
+          <caption class="visually-hidden">{{ composition.label }} per reading for {{ period_label }}</caption>
+          <thead>
+            <tr><th scope="col">Reading</th><th scope="col" class="num">{{ composition.label }} ({{ composition.unit|default:"no unit" }})</th><th scope="col">Note</th></tr>
+          </thead>
+          <tbody>
+            {% for row in composition.rows %}
+            <tr><td>{{ row.date }}</td><td class="num">{{ row.value }}</td><td class="muted">{{ row.note }}</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </details>
+    {% else %}
+    <p class="muted">No {{ composition.label|lower }} readings in {{ period_label }}.</p>
+    {% endif %}
+  </section>
+</div>
+
+<div class="report-grid">
+  <section class="card report-card">
+    <div class="card-head">
+      <h2>Consistency</h2>
+      <span class="muted small">{{ consistency.days }} day{{ consistency.days|pluralize }} with readings</span>
+    </div>
+    <div class="heatmap-scroll" tabindex="0" role="group" aria-label="Readings per day for the last year">
+      <div class="heatmap">
+        <div class="heatmap-months" aria-hidden="true">
+          {% for week in consistency.weeks %}<span>{{ week.label }}</span>{% endfor %}
+        </div>
+        <div class="heatmap-body">
+          <div class="heatmap-days" aria-hidden="true">
+            <span>Mon</span><span></span><span>Wed</span><span></span><span>Fri</span><span></span><span>Sun</span>
+          </div>
+          <div class="heatmap-grid">
+            {% for week in consistency.weeks %}
+            {% for cell in week.cells %}
+            <span class="heat-cell{% if cell.level is None %} is-outside{% else %} level-{{ cell.level }}{% endif %}"{% if cell.title %} title="{{ cell.title }}"{% endif %}></span>
+            {% endfor %}
+            {% endfor %}
+          </div>
+        </div>
+      </div>
+    </div>
+    <p class="chart-note">
+      <span class="heat-legend" aria-hidden="true"><span class="heat-cell level-0"></span><span class="heat-cell level-1"></span><span class="heat-cell level-2"></span><span class="heat-cell level-3"></span></span>
+      Less <span aria-hidden="true">→</span> More
+    </p>
+    <details class="data-table" data-print-open>
+      <summary>Show the numbers</summary>
+      <div class="table-wrap">
+        <table class="table">
+          <caption class="visually-hidden">Readings per day from {{ consistency.window_label }}</caption>
+          <thead>
+            <tr><th scope="col">Date</th><th scope="col">Day</th><th scope="col" class="num">Readings</th></tr>
+          </thead>
+          <tbody>
+            {% for row in consistency.heat_rows %}
+            <tr><td>{{ row.date }}</td><td>{{ row.weekday }}</td><td class="num">{{ row.readings }}</td></tr>
+            {% empty %}
+            <tr><td colspan="3">No readings in the last year.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </details>
+  </section>
+
+  <section class="card report-card">
+    <div class="card-head">
+      <h2>Readings per week</h2>
+      <span class="muted small">{{ weekly.total }} in {{ weekly.weeks }} week{{ weekly.weeks|pluralize }}</span>
+    </div>
+    {% if weekly.has_points %}
+    <div class="chart-wrap">
+      {% include "partials/report_chart.html" with chart=weekly.chart %}
+    </div>
+    <p class="chart-note">Shaded bar: a week still in progress.</p>
+    <details class="data-table" data-print-open>
+      <summary>Show the numbers</summary>
+      <div class="table-wrap">
+        <table class="table">
+          <caption class="visually-hidden">Readings per week for {{ period_label }}</caption>
+          <thead>
+            <tr><th scope="col">Period</th><th scope="col" class="num">Readings</th><th scope="col">Note</th></tr>
+          </thead>
+          <tbody>
+            {% for row in weekly.rows %}
+            <tr><td>{{ row.date }}</td><td class="num">{{ row.text }}</td><td class="muted">{{ row.note|default:"—" }}</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </details>
+    {% else %}
+    <p class="muted">No readings in {{ period_label }}.</p>
+    {% endif %}
+  </section>
+</div>
+
+<section class="card report-card">
+  <div class="card-head">
+    <h2>Extremes</h2>
+    <span class="muted small">Highest, lowest and latest per metric</span>
+  </div>
+  {% if extremes %}
+  <ul class="record-list">
+    {% for row in extremes %}
+    <li class="record-row">
+      <a class="record-name" href="{{ row.url }}">{{ row.label }}</a>
+      <span class="record-value">{{ row.latest.value }} {{ row.unit }}</span>
+      <span class="record-detail muted small">High {{ row.high.value }} on {{ row.high.date }} · Low {{ row.low.value }} on {{ row.low.date }} · Latest on {{ row.latest.date }} · {{ row.count }} reading{{ row.count|pluralize }}</span>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="muted">No readings in {{ period_label }}.</p>
+  {% endif %}
+</section>
+
+{% endif %}
+{% endif %}
+{% endblock %}
