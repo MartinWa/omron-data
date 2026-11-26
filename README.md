@@ -68,6 +68,21 @@ count tells you how many need a look. `--overwrite` applies the file's values in
 `--dry-run` reports the counts without writing anything, so a first import can be inspected
 before it lands.
 
+## Import history
+
+Every import is recorded: the file, its checksum, how many readings it carried, and the
+range it covered. That answers "have I imported September yet?", and it makes a repeated
+import free — a file whose checksum is already in the ledger is not read again.
+
+```sh
+uv run python manage.py coverage --owner alice
+uv run python manage.py purge_import --id 4 --owner alice --dry-run
+```
+
+`coverage` lists each metric with its first and last reading and every gap longer than a
+week. `purge_import` deletes exactly the rows one import created, which is how a wrong file
+is undone without disturbing anything imported before or since.
+
 ## Development
 
 ```sh

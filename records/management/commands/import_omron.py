@@ -1,13 +1,19 @@
+from datetime import datetime
 from pathlib import Path
 
 from django.contrib.auth import get_user_model
 from django.core.management.base import BaseCommand, CommandError
-from django.db import transaction
+from django.utils import timezone
 
-from parsing.report import parse_file
-from records.importer import import_readings
+from records.importer import COUNTS, import_report
 
-FIELDS = ("created", "skipped", "conflicts", "overwritten", "panels")
+LABELS = {
+    "created": "created",
+    "skipped": "skipped",
+    "conflicts": "conflicts",
+    "overwritten": "overwritten",
+    "panels": "new panels",
+}
 
 
 def _files(givens: list[Path]) -> list[Path]:
@@ -18,6 +24,18 @@ def _files(givens: list[Path]) -> list[Path]:
             continue
         found.extend(sorted(path for path in given.parent.glob(given.name) if path.is_file()))
     return found
+
+
+def stamp(at: datetime) -> str:
+    return timezone.localtime(at).strftime("%Y-%m-%d %H:%M")
+
+
+def _line(report: dict[str, object]) -> str:
+    counts = ", ".join(f"{report[field]} {LABELS[field]}" for field in COUNTS)
+    prefix = ""
+    if report["already_imported"] is not None:
+        prefix = f"already imported at {stamp(report['already_imported'])}, "
+    return f"{prefix}{report['readings']} readings, {counts}"
 
 
 class Command(BaseCommand):
@@ -41,24 +59,17 @@ class Command(BaseCommand):
         if not files:
             raise CommandError("no files matched")
 
-        total = dict.fromkeys(FIELDS, 0)
+        total = dict.fromkeys(COUNTS, 0)
         readings_total = 0
-        with transaction.atomic():
-            owner = self._owner(options)
-            for path in files:
-                readings = parse_file(path)
-                counts = import_readings(owner, readings, overwrite=options["overwrite"])
-                readings_total += len(readings)
-                for field in FIELDS:
-                    total[field] += counts[field]
-                self.stdout.write(
-                    f"{path.name}: {len(readings)} readings, "
-                    f"{counts['created']} created, {counts['skipped']} skipped, "
-                    f"{counts['conflicts']} conflicts, {counts['overwritten']} overwritten, "
-                    f"{counts['panels']} new panels"
-                )
-            if options["dry_run"]:
-                transaction.set_rollback(True)
+        owner = self._owner(options)
+        for path in files:
+            report = import_report(
+                owner, path, overwrite=options["overwrite"], dry_run=options["dry_run"]
+            )
+            readings_total += report["readings"]
+            for field in COUNTS:
+                total[field] += report[field]
+            self.stdout.write(f"{path.name}: {_line(report)}")
 
         self.stdout.write(
             f"total: {len(files)} files, {readings_total} readings, "

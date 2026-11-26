@@ -11,7 +11,8 @@ from django.test.utils import CaptureQueriesContext
 
 from parsing.report import Reading, parse_text
 from records.importer import import_readings
-from records.models import Measurement
+from records.management.commands.import_omron import stamp
+from records.models import ImportRun, Measurement
 from records.tokens import issue
 
 HEADER = (
@@ -218,6 +219,7 @@ def test_command_dry_run_writes_nothing(owner, tmp_path):
     call_command("import_omron", str(tmp_path), "--owner", "alice", "--dry-run", stdout=out)
 
     assert Measurement.objects.filter(owner=owner).count() == 0
+    assert ImportRun.objects.filter(owner=owner).count() == 0
     assert (
         "export.csv: 3 readings, 3 created, 0 skipped, 0 conflicts, 0 overwritten, 1 new panels"
         in out.getvalue()
@@ -255,3 +257,43 @@ def test_api_returns_only_owned_rows(owner):
         "diastolic_bp",
         "pulse",
     }
+
+
+def test_command_names_the_earlier_import_for_an_identical_file(owner, tmp_path):
+    (tmp_path / "export.csv").write_text(report("10 juni 2024,08:00,130,85,70,,"), encoding="utf-8")
+    call_command("import_omron", str(tmp_path), "--owner", "alice", stdout=StringIO())
+    run = ImportRun.objects.get(owner=owner)
+
+    out = StringIO()
+    call_command("import_omron", str(tmp_path), "--owner", "alice", stdout=out)
+
+    text = out.getvalue()
+    assert f"export.csv: already imported at {stamp(run.imported_at)}" in text
+    assert "0 readings, 0 created, 0 skipped, 0 conflicts, 0 overwritten, 0 new panels" in text
+    assert "total: 1 files, 0 readings, 0 created" in text
+    assert ImportRun.objects.filter(owner=owner).count() == 1
+    assert Measurement.objects.filter(owner=owner).count() == 4
+
+
+def test_command_overwrite_reimports_a_checksum_duplicate(owner, tmp_path):
+    (tmp_path / "export.csv").write_text(report("10 juni 2024,08:00,130,85,70,,"), encoding="utf-8")
+    call_command("import_omron", str(tmp_path), "--owner", "alice", stdout=StringIO())
+
+    out = StringIO()
+    call_command("import_omron", str(tmp_path), "--owner", "alice", "--overwrite", stdout=out)
+
+    text = out.getvalue()
+    assert "already imported" not in text
+    assert "export.csv: 3 readings, 0 created, 3 skipped" in text
+    assert ImportRun.objects.filter(owner=owner).count() == 2
+    assert Measurement.objects.filter(owner=owner).count() == 4
+
+
+def test_command_parse_failure_leaves_no_run_and_no_readings(owner, tmp_path):
+    (tmp_path / "export.csv").write_bytes("not a report \u00e9".encode("latin-1"))
+
+    with pytest.raises(UnicodeDecodeError):
+        call_command("import_omron", str(tmp_path), "--owner", "alice", stdout=StringIO())
+
+    assert ImportRun.objects.filter(owner=owner).count() == 0
+    assert Measurement.objects.filter(owner=owner).count() == 0

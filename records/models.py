@@ -32,6 +32,29 @@ COMPONENTS = ("systolic_bp", "diastolic_bp", "pulse")
 PANEL = "blood_pressure"
 
 
+class ImportRun(models.Model):
+    owner = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="imports"
+    )
+    file_name = models.CharField(max_length=255)
+    content_sha256 = models.CharField(max_length=64, db_index=True)
+    readings = models.PositiveIntegerField(default=0)
+    created = models.PositiveIntegerField(default=0)
+    skipped = models.PositiveIntegerField(default=0)
+    conflicts = models.PositiveIntegerField(default=0)
+    overwritten = models.PositiveIntegerField(default=0)
+    panels = models.PositiveIntegerField(default=0)
+    first_at = models.DateTimeField(null=True, blank=True)
+    last_at = models.DateTimeField(null=True, blank=True)
+    imported_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-imported_at"]
+
+    def __str__(self) -> str:
+        return f"{self.file_name} ({self.imported_at:%Y-%m-%d %H:%M})"
+
+
 class Measurement(models.Model):
     owner = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="measurements"
@@ -43,6 +66,13 @@ class Measurement(models.Model):
     note = models.CharField(max_length=100, blank=True)
     parent = models.ForeignKey(
         "self", null=True, blank=True, on_delete=models.CASCADE, related_name="components"
+    )
+    import_run = models.ForeignKey(
+        "records.ImportRun",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="measurements",
     )
 
     class Meta:

@@ -2,16 +2,19 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from decimal import Decimal
+from hashlib import sha256
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from django.db import transaction
 
-from parsing.report import Reading
+from parsing.report import Reading, parse_text
 
-from .models import COMPONENTS, METRICS, PANEL, Measurement
+from .models import COMPONENTS, METRICS, PANEL, ImportRun, Measurement
 
 LOCAL = ZoneInfo("Europe/Stockholm")
 VALUE_STEP = Decimal(1).scaleb(-Measurement._meta.get_field("value").decimal_places)
+COUNTS = ("created", "skipped", "conflicts", "overwritten", "panels")
 
 
 def _local(at: datetime) -> datetime:
@@ -28,7 +31,9 @@ def _stored(owner, first: datetime, last: datetime) -> dict[tuple[str, datetime]
 
 
 @transaction.atomic
-def import_readings(owner, readings: list[Reading], *, overwrite: bool = False) -> dict[str, int]:
+def import_readings(
+    owner, readings: list[Reading], *, overwrite: bool = False, run: ImportRun | None = None
+) -> dict[str, int]:
     counts = {"created": 0, "skipped": 0, "conflicts": 0, "panels": 0, "overwritten": 0}
 
     unique: dict[tuple[str, datetime], Reading] = {}
@@ -60,6 +65,7 @@ def import_readings(owner, readings: list[Reading], *, overwrite: bool = False) 
                     value=value,
                     unit=METRICS[metric].unit,
                     note=reading.note,
+                    import_run=run,
                 )
             )
             counts["created"] += 1
@@ -87,7 +93,14 @@ def import_readings(owner, readings: list[Reading], *, overwrite: bool = False) 
         if (PANEL, instant) in existing:
             continue
         panels.append(
-            Measurement(owner=owner, metric=PANEL, at=at, unit="", note=notes.get(instant, ""))
+            Measurement(
+                owner=owner,
+                metric=PANEL,
+                at=at,
+                unit="",
+                note=notes.get(instant, ""),
+                import_run=run,
+            )
         )
         counts["panels"] += 1
 
@@ -123,3 +136,61 @@ def import_readings(owner, readings: list[Reading], *, overwrite: bool = False) 
         Measurement.objects.bulk_update(refreshed, ["note"])
 
     return counts
+
+
+def _span(readings: list[Reading]) -> tuple[datetime | None, datetime | None]:
+    if not readings:
+        return (None, None)
+    moments = [_local(reading.at) for reading in readings]
+    return (min(moments), max(moments))
+
+
+@transaction.atomic
+def import_report(
+    owner, path: Path, *, overwrite: bool = False, dry_run: bool = False
+) -> dict[str, object]:
+    content = path.read_bytes()
+    digest = sha256(content).hexdigest()
+    result: dict[str, object] = {
+        "file_name": path.name,
+        "readings": 0,
+        **dict.fromkeys(COUNTS, 0),
+        "run": None,
+        "already_imported": None,
+    }
+
+    if not overwrite:
+        prior = (
+            ImportRun.objects.filter(owner=owner, content_sha256=digest)
+            .order_by("-imported_at")
+            .first()
+        )
+        if prior is not None:
+            result["already_imported"] = prior.imported_at
+            return result
+
+    readings = parse_text(content.decode("utf-8-sig"))
+    result["readings"] = len(readings)
+
+    if dry_run:
+        with transaction.atomic():
+            result.update(import_readings(owner, readings, overwrite=overwrite))
+            transaction.set_rollback(True)
+        return result
+
+    first_at, last_at = _span(readings)
+    run = ImportRun.objects.create(
+        owner=owner,
+        file_name=path.name,
+        content_sha256=digest,
+        readings=len(readings),
+        first_at=first_at,
+        last_at=last_at,
+    )
+    counts = import_readings(owner, readings, overwrite=overwrite, run=run)
+    result.update(counts)
+    for field, value in counts.items():
+        setattr(run, field, value)
+    run.save(update_fields=list(counts))
+    result["run"] = run
+    return result
