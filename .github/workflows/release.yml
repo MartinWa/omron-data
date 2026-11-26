@@ -58,7 +58,7 @@ jobs:
       # The version tag is the last thing this job writes, so a rerun of a failed
       # release sees an unpublished version and starts over. A version that is
       # already published means an earlier run got as far as promoting it; that
-      # run only has to finish the visibility check below.
+      # run only has to reconcile `latest` and finish the visibility check below.
       - name: Resolve an already published version
         id: existing
         env:
@@ -80,9 +80,33 @@ jobs:
           printf 'published=%s\n' "$published" >> "$GITHUB_OUTPUT"
           if [ "$published" = true ]; then
             digest=$(docker buildx imagetools inspect "$IMAGE:$VERSION" --format '{{json .Manifest.Digest}}' | tr -d '"')
+            [ -n "$digest" ] || { echo "::error::Cannot read the digest of $IMAGE:$VERSION."; exit 1; }
             printf 'digest=%s\n' "$digest" >> "$GITHUB_OUTPUT"
             printf 'Resuming: %s:%s is already published as %s, so the build and the attestations are skipped.\n' \
               "$IMAGE" "$VERSION" "$digest" >> "$GITHUB_STEP_SUMMARY"
+            # A promotion writes the version tag and `latest` as two registry writes, so a
+            # run that died between them leaves `latest` on the previous release while the
+            # version tag already exists. Finish that second write here. Only the highest
+            # published version may claim `latest`, so retrying an older run cannot move it
+            # backwards.
+            newest=$(grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' "$RUNNER_TEMP/image-tags" | sort -V | tail -n 1)
+            [ -n "$newest" ] || { echo "::error::No released version tag in the package listing."; exit 1; }
+            latest=$(docker buildx imagetools inspect "$IMAGE:latest" --format '{{json .Manifest.Digest}}' 2>/dev/null | tr -d '"' || true)
+            if [ "$latest" != "$digest" ]; then
+              if [ "$VERSION" = "$newest" ]; then
+                docker buildx imagetools create --tag "$IMAGE:latest" "$IMAGE@$digest"
+                latest=$(docker buildx imagetools inspect "$IMAGE:latest" --format '{{json .Manifest.Digest}}' | tr -d '"')
+                if [ "$latest" != "$digest" ]; then
+                  echo "::error::$IMAGE:latest resolves to $latest, not to the attested $digest."
+                  exit 1
+                fi
+                printf 'Re-pointed %s:latest at %s, left behind by a promotion interrupted between its two tag writes.\n' \
+                  "$IMAGE" "$digest" >> "$GITHUB_STEP_SUMMARY"
+              else
+                printf 'Left %s:latest alone: %s is published, but %s is the highest version.\n' \
+                  "$IMAGE" "$VERSION" "$newest" >> "$GITHUB_STEP_SUMMARY"
+              fi
+            fi
           fi
       - name: Build the amd64 image by digest
         id: amd64
@@ -227,6 +251,13 @@ jobs:
           promoted=$(docker buildx imagetools inspect "$IMAGE:$VERSION" --format '{{json .Manifest.Digest}}' | tr -d '"')
           if [ "$promoted" != "$DIGEST" ]; then
             echo "::error::$IMAGE:$VERSION resolves to $promoted, not to the attested $DIGEST."
+            exit 1
+          fi
+          # The two tags are two registry writes, so verify both rather than assuming the
+          # one command wrote them together.
+          latest=$(docker buildx imagetools inspect "$IMAGE:latest" --format '{{json .Manifest.Digest}}' | tr -d '"')
+          if [ "$latest" != "$DIGEST" ]; then
+            echo "::error::$IMAGE:latest resolves to $latest, not to the attested $DIGEST."
             exit 1
           fi
           printf 'digest=%s\n' "$DIGEST" >> "$GITHUB_OUTPUT"
