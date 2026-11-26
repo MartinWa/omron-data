@@ -1,0 +1,171 @@
+{% extends "base.html" %}
+{% load assets formatting %}
+{% block title %}Preview import — omron-data{% endblock %}
+{% block scripts %}
+<script src="{% asset 'records/submit-once.js' %}" defer></script>
+{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>Preview import</h1>
+  <p class="lede">Nothing has been written yet. Check the counts and the warnings, then confirm at the bottom of the page.</p>
+</div>
+
+<div class="stat-grid">
+  <div class="stat">
+    <span class="stat-label">Readings</span>
+    <span class="stat-value">{{ summary.readings_total }}</span>
+  </div>
+  <div class="stat">
+    <span class="stat-label">Created</span>
+    <span class="stat-value">{{ summary.counts.created }}</span>
+  </div>
+  <div class="stat">
+    <span class="stat-label">Skipped</span>
+    <span class="stat-value">{{ summary.counts.skipped }}</span>
+  </div>
+  <div class="stat">
+    <span class="stat-label">Conflicts</span>
+    <span class="stat-value">{{ summary.counts.conflicts }}</span>
+  </div>
+  <div class="stat">
+    <span class="stat-label">Overwritten</span>
+    <span class="stat-value">{{ summary.counts.overwritten }}</span>
+  </div>
+  <div class="stat">
+    <span class="stat-label">New panels</span>
+    <span class="stat-value">{{ summary.counts.panels }}</span>
+  </div>
+  <div class="stat">
+    <span class="stat-label">Invalid</span>
+    <span class="stat-value">{{ summary.counts.invalid }}</span>
+  </div>
+</div>
+
+{% if summary.already_imported %}
+<div class="notice notice-warn">
+  <strong>This export was already imported.</strong>
+  <span>It was imported at {{ summary.already_imported }}. Confirming without replay changes nothing.</span>
+</div>
+{% endif %}
+
+{% if summary.conflict_total or summary.invalid_total %}
+<div class="card">
+  <div class="card-head">
+    <h2>Warnings</h2>
+    <span class="badge badge-warning">{{ summary.conflict_total|add:summary.invalid_total }} row{{ summary.conflict_total|add:summary.invalid_total|pluralize }} affected</span>
+  </div>
+  <ul class="warning-groups">
+    {% if summary.conflict_total %}
+    <li class="warning-group">
+      <details>
+        <summary>
+          <span class="badge badge-warning">{{ summary.conflict_total }} conflict{{ summary.conflict_total|pluralize }}</span>
+          <span>The file disagrees with a reading you already have</span>
+        </summary>
+        <div class="table-wrap">
+          <table class="table">
+            <caption class="visually-hidden">Readings that differ from the stored value</caption>
+            <thead>
+              <tr>
+                <th scope="col" class="nowrap">Measured</th>
+                <th scope="col">Reading</th>
+                <th scope="col" class="num">Stored</th>
+                <th scope="col" class="num">In file</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for row in summary.conflicts %}
+              <tr>
+                <td class="muted nowrap">{{ row.at }}</td>
+                <td>{{ row.metric }}</td>
+                <td class="num">{{ row.stored|num }}</td>
+                <td class="num">{{ row.incoming|num }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        <p class="warning-lines">
+          Stored readings are never replaced here.{% if summary.conflict_hidden %} Showing the first {{ summary.conflicts|length }} of {{ summary.conflict_total }}.{% endif %}
+        </p>
+      </details>
+    </li>
+    {% endif %}
+    {% if summary.invalid_total %}
+    <li class="warning-group">
+      <details>
+        <summary>
+          <span class="badge badge-warning">{{ summary.invalid_total }} invalid row{{ summary.invalid_total|pluralize }}</span>
+          <span>The file names a moment that does not exist</span>
+        </summary>
+        <p class="warning-lines">
+          {{ summary.invalid|join:", " }}{% if summary.invalid_hidden %}, and {{ summary.invalid_hidden }} more{% endif %} do not exist in {{ summary.time_zone }}, so they are not imported. Check OMRON_TIME_ZONE in settings if the zone is wrong.
+        </p>
+      </details>
+    </li>
+    {% endif %}
+  </ul>
+</div>
+{% endif %}
+
+<div class="card">
+  <div class="card-head">
+    <h2>Readings in this file</h2>
+    <span class="badge">{{ summary.readings|length }}</span>
+  </div>
+  {% if summary.readings|length > 10 %}
+  <p class="muted small">Showing the first 10 of {{ summary.readings|length }} readings.</p>
+  {% endif %}
+  <div class="table-wrap">
+    <table class="table">
+      <caption class="visually-hidden">Readings in this export, newest first</caption>
+      <thead>
+        {% include "records/partials/preview_reading_head.html" %}
+      </thead>
+      <tbody>
+        {% for reading in summary.readings|slice:":10" %}
+        {% include "records/partials/preview_reading_row.html" %}
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% if summary.readings|length > 10 %}
+  <details class="show-all">
+    <summary>Show all {{ summary.readings|length }} readings</summary>
+    <div class="table-wrap">
+      <table class="table">
+        <caption class="visually-hidden">Remaining readings in this export, newest first</caption>
+        <thead>
+          {% include "records/partials/preview_reading_head.html" %}
+        </thead>
+        <tbody>
+          {% for reading in summary.readings %}{% if forloop.counter > 10 %}
+          {% include "records/partials/preview_reading_row.html" %}
+          {% endif %}{% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </details>
+  {% endif %}
+</div>
+
+<div class="card action-bar">
+  <div class="action-summary">
+    <strong>Confirming stores {{ summary.counts.created }} new reading{{ summary.counts.created|pluralize }} and {{ summary.counts.panels }} new panel{{ summary.counts.panels|pluralize }}.</strong>
+    <span class="muted small">Stored readings are never replaced. Anything the file cannot place is reported, not written.</span>
+  </div>
+  <form method="post" class="actions">
+    {% csrf_token %}
+    <input type="hidden" name="import_id" value="{{ import_id }}">
+    <input type="hidden" name="fingerprint" value="{{ fingerprint }}">
+    {% if summary.replay %}
+    <label class="checkbox">
+      <input type="checkbox" name="replay" value="1">
+      Replay: fill gaps without replacing stored readings
+    </label>
+    {% endif %}
+    <button class="btn btn-primary" type="submit" name="action" value="confirm" data-submit-once>Confirm import</button>
+    <button class="btn btn-ghost" type="submit" name="action" value="cancel">Cancel</button>
+  </form>
+</div>
+{% endblock %}

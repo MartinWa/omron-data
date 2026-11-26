@@ -35,7 +35,7 @@
       {% if user.is_authenticated %}
       <nav class="site-nav" aria-label="Main">
         <a href="{% url 'readings' %}"{% if request.resolver_match.url_name == 'readings' %} class="active" aria-current="page"{% endif %}>Readings</a>
-        <a href="{% url 'imports' %}"{% if request.resolver_match.url_name == 'imports' %} class="active" aria-current="page"{% endif %}>Imports</a>
+        <a href="{% url 'imports' %}"{% if request.resolver_match.url_name == 'imports' or request.resolver_match.url_name == 'import_upload' or request.resolver_match.url_name == 'import_preview' %} class="active" aria-current="page"{% endif %}>Imports</a>
         <a href="{% url 'tokens' %}"{% if request.resolver_match.url_name == 'tokens' %} class="active" aria-current="page"{% endif %}>Tokens</a>
       </nav>
       {% endif %}

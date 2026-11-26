@@ -1,0 +1,161 @@
+{% extends "base.html" %}
+{% load assets formatting %}
+{% block title %}Imports — omron-data{% endblock %}
+{% block scripts %}
+<script src="{% asset 'records/delete.js' %}" defer></script>
+{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>Imports</h1>
+  <p class="lede">One row per OMRON connect CSV export you have imported, newest first.</p>
+</div>
+
+<div class="actions">
+  <a class="btn btn-primary" href="{% url 'import_upload' %}">Import a CSV export</a>
+</div>
+
+{% if not has_runs %}
+<div class="empty">
+  <svg class="empty-icon" width="38" height="38" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 3.5v10m0 0l-3.5-3.5M12 13.5l3.5-3.5M4 16.5v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>
+  <p>No imports yet.</p>
+  <p class="small">An export is parsed and counted on a preview page before anything is written.</p>
+  <a class="btn btn-primary" href="{% url 'import_upload' %}">Import a CSV export</a>
+</div>
+{% else %}
+<div class="card">
+  <div class="card-head">
+    <h2>Import runs</h2>
+    <span class="badge">{{ page.paginator.count }}</span>
+  </div>
+  <div class="table-wrap">
+    <table class="table table-cards">
+      <caption class="visually-hidden">Imported CSV exports, newest first</caption>
+      <thead>
+        <tr>
+          <th scope="col">File</th>
+          <th scope="col" class="nowrap">Imported</th>
+          <th scope="col" class="num">Readings</th>
+          <th scope="col" class="num">Created</th>
+          <th scope="col" class="num">Skipped</th>
+          <th scope="col" class="num">Conflicts</th>
+          <th scope="col" class="num">Overwritten</th>
+          <th scope="col" class="num">Panels</th>
+          <th scope="col">Covered</th>
+          <th scope="col" class="tight">Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for run in page %}
+        <tr>
+          <td data-label="File">{{ run.file_name }}</td>
+          <td data-label="Imported" class="muted nowrap"><time datetime="{{ run.imported_at|date:'c' }}">{{ run.imported_at|isodate }}</time></td>
+          <td data-label="Readings" class="num">{{ run.readings }}</td>
+          <td data-label="Created" class="num">{{ run.created }}</td>
+          <td data-label="Skipped" class="num">{{ run.skipped }}</td>
+          <td data-label="Conflicts" class="num">
+            {% if run.conflicts %}
+            <span class="badge badge-warning">{{ run.conflicts }} conflict{{ run.conflicts|pluralize }}</span>
+            {% else %}
+            <span class="muted">0</span>
+            {% endif %}
+          </td>
+          <td data-label="Overwritten" class="num">{{ run.overwritten }}</td>
+          <td data-label="Panels" class="num">{{ run.panels }}</td>
+          <td data-label="Covered" class="muted nowrap">
+            {% if run.first_at %}<time datetime="{{ run.first_at|date:'c' }}">{{ run.first_at|isodate }}</time> – {{ run.last_at|isodate }}{% else %}<span class="muted">—</span>{% endif %}
+          </td>
+          <td class="tight" data-actions>
+            <div class="row-confirm" data-delete-zone>
+              <a class="btn btn-sm btn-danger" href="?confirm={{ run.pk }}" data-delete-start>Purge</a>
+              <form method="post" action="{% url 'purge_import_run' run.pk %}" data-delete-form{% if request.GET.confirm != run.pk|stringformat:"s" %} hidden{% endif %}>
+                {% csrf_token %}
+                <p class="small" id="purge-warning-{{ run.pk }}">Deletes the {{ run.rows }} measurement{{ run.rows|pluralize }} this run created from {{ run.file_name }}, then the run itself. Other runs and the readings they share stay untouched.</p>
+                <label class="checkbox">
+                  <input type="checkbox" name="confirm" value="1" required>
+                  I understand
+                </label>
+                <button class="btn btn-sm btn-danger" type="submit" aria-describedby="purge-warning-{{ run.pk }}">Purge run</button>
+                <a class="btn btn-sm btn-ghost" href="{% url 'imports' %}">Cancel</a>
+              </form>
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+{% if page.has_other_pages %}
+{% include "partials/pager.html" %}
+{% endif %}
+
+<div class="card">
+  <div class="card-head">
+    <h2>Coverage</h2>
+    <span class="badge">{{ coverage.gaps }} gap{{ coverage.gaps|pluralize }}</span>
+  </div>
+  <div class="stat-grid">
+    <div class="stat">
+      <span class="stat-label">Readings</span>
+      <span class="stat-value">{{ coverage.readings }}</span>
+    </div>
+    <div class="stat">
+      <span class="stat-label">Events</span>
+      <span class="stat-value">{{ coverage.events }}</span>
+    </div>
+    <div class="stat">
+      <span class="stat-label">First reading</span>
+      <span class="stat-value">{{ coverage.first|isodate }}</span>
+    </div>
+    <div class="stat">
+      <span class="stat-label">Last reading</span>
+      <span class="stat-value">{{ coverage.last|isodate }}</span>
+    </div>
+  </div>
+  <p class="muted small">
+    Readings leaves out the blood pressure panel, which groups the systolic, diastolic and pulse values taken at one moment. A gap is more than {{ coverage.gap_days }} days without a reading of that metric.
+  </p>
+  {% if coverage.metrics %}
+  <div class="table-wrap">
+    <table class="table table-cards">
+      <caption class="visually-hidden">Per-metric coverage and the gaps over {{ coverage.gap_days }} days</caption>
+      <thead>
+        <tr>
+          <th scope="col">Metric</th>
+          <th scope="col" class="num">Readings</th>
+          <th scope="col" class="nowrap">First</th>
+          <th scope="col" class="nowrap">Last</th>
+          <th scope="col">Gaps</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in coverage.metrics %}
+        <tr>
+          <td data-label="Metric">{{ row.label }}</td>
+          <td data-label="Readings" class="num">{{ row.count }}</td>
+          <td data-label="First" class="muted nowrap">{{ row.first|isodate }}</td>
+          <td data-label="Last" class="muted nowrap">{{ row.last|isodate }}</td>
+          <td data-label="Gaps">
+            {% if row.gaps %}
+            <details class="show-all">
+              <summary>{{ row.gaps|length }} gap{{ row.gaps|length|pluralize }}</summary>
+              <ul class="warning-lines">
+                {% for gap in row.gaps %}
+                <li>{{ gap.before|isodate }} → {{ gap.after|isodate }} ({{ gap.span }})</li>
+                {% endfor %}
+              </ul>
+            </details>
+            {% else %}
+            <span class="muted">None</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+</div>
+{% endif %}
+{% endblock %}

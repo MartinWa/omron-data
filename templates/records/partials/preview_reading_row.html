@@ -1,0 +1,7 @@
+{% load formatting %}
+<tr>
+  <td class="muted nowrap">{{ reading.at }}</td>
+  <td>{{ reading.label }}</td>
+  <td class="num">{{ reading.value|num }}</td>
+  <td class="muted">{{ reading.unit }}</td>
+</tr>
