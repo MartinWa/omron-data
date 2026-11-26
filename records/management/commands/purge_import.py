@@ -30,6 +30,10 @@ class Command(BaseCommand):
         doomed.delete()
         run.delete()
         self.stdout.write(f"run {run_id} ({run.file_name}): deleted {rows} measurements")
+        self.stdout.write(
+            "hint: re-import windows that overlapped this run with import_omron --replay, "
+            "without it their shared readings stay missing"
+        )
 
     def _run(self, options) -> ImportRun:
         owner = get_user_model().objects.filter(username=options["owner"]).first()

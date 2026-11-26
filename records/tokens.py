@@ -16,5 +16,7 @@ def issue(owner, name: str) -> str:
 
 def resolve(key: str):
     return (
-        ApiToken.objects.select_related("owner").filter(digest=_digest(key), revoked=False).first()
+        ApiToken.objects.select_related("owner")
+        .filter(digest=_digest(key), revoked=False, owner__is_active=True)
+        .first()
     )

@@ -63,6 +63,18 @@ def test_skips_missing_and_ignores_headers():
     assert len(parse_text("Datum,Tid,Vikt (kg)\r\n")) == 0
 
 
+def test_a_duplicate_note_column_falls_through_to_its_second_occurrence():
+    header = (
+        "Datum,Tid,Systoliskt tryck (mmHg),Diastoliskt tryck (mmHg),Puls (slag/min),"
+        "Anmärkningar,Mätläge,Anmärkningar"
+    )
+    report = "\n".join([header, "4 juli 2024,10:31,145,81,68,,AFib,Second comment", ""])
+
+    readings = parse_text(report)
+
+    assert next(r for r in readings if r.metric == "systolic_bp").note == "Second comment"
+
+
 def test_blood_pressure_section_metrics():
     assert metrics(BLOOD_PRESSURE) == {"systolic_bp", "diastolic_bp", "pulse"}
 
@@ -217,6 +229,48 @@ def test_note_reads_older_malage_spelling():
     systolic = next(reading for reading in parse_text(text) if reading.metric == "systolic_bp")
 
     assert systolic.note == "hemma"
+
+
+def test_note_priority_ignores_where_the_columns_sit():
+    text = (
+        "Datum,Tid,Systoliskt tryck (mmHg),Puls (slag/min),Mätläge,Anmärkningar\r\n"
+        "04 juli 2024,10:31,145,68,hemma,AFib\r\n"
+    )
+
+    systolic = next(reading for reading in parse_text(text) if reading.metric == "systolic_bp")
+
+    assert systolic.note == "AFib"
+
+
+def test_note_priority_holds_when_anmarkningar_comes_first():
+    text = (
+        "Datum,Tid,Systoliskt tryck (mmHg),Anmärkningar,Mätläge,Puls (slag/min)\r\n"
+        "04 juli 2024,10:31,145,AFib,hemma,68\r\n"
+    )
+
+    systolic = next(reading for reading in parse_text(text) if reading.metric == "systolic_bp")
+
+    assert systolic.note == "AFib"
+
+
+def test_note_uses_matlage_when_it_is_the_only_column():
+    text = (
+        "Datum,Tid,Systoliskt tryck (mmHg),Puls (slag/min),Mätläge\r\n"
+        "04 juli 2024,10:31,145,68,hemma\r\n"
+    )
+
+    systolic = next(reading for reading in parse_text(text) if reading.metric == "systolic_bp")
+
+    assert systolic.note == "hemma"
+
+
+def test_a_date_header_without_a_measurement_column_raises():
+    with pytest.raises(ValueError, match="report has header rows"):
+        parse_text("Mätdatum,Tid,Unrelated\r\n")
+
+
+def test_a_date_header_with_an_empty_measurement_column_is_an_empty_export():
+    assert parse_text("Mätdatum,Tid,Vikt (kg)\r\n") == []
 
 
 def test_no_note_column_stores_no_note():

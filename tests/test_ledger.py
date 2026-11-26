@@ -8,7 +8,7 @@ from django.core.management import call_command
 from django.core.management.base import CommandError
 
 from parsing.report import Reading
-from records.importer import LOCAL, import_readings, import_report
+from records.importer import import_readings, import_report, local_zone
 from records.management.commands.import_omron import stamp
 from records.models import ImportRun, Measurement
 from tests.test_import import report, window
@@ -41,8 +41,9 @@ def test_successful_run_records_counts_and_span(owner, tmp_path):
     assert len(run.content_sha256) == 64
     assert (run.readings, run.created, run.skipped) == (6, 6, 0)
     assert (run.conflicts, run.overwritten, run.panels) == (0, 0, 2)
-    assert run.first_at.astimezone(LOCAL) == datetime(2024, 6, 10, 8, 0, tzinfo=LOCAL)
-    assert run.last_at.astimezone(LOCAL) == datetime(2024, 6, 12, 9, 30, tzinfo=LOCAL)
+    local = local_zone()
+    assert run.first_at.astimezone(local) == datetime(2024, 6, 10, 8, 0, tzinfo=local)
+    assert run.last_at.astimezone(local) == datetime(2024, 6, 12, 9, 30, tzinfo=local)
     assert Measurement.objects.filter(owner=owner, import_run=run).count() == 8
 
 
@@ -80,6 +81,19 @@ def test_overwrite_records_a_second_run(owner, tmp_path):
     assert result["created"] == 0
     assert result["skipped"] == 3
     assert result["panels"] == 0
+    assert ImportRun.objects.filter(owner=owner).count() == 2
+    assert Measurement.objects.filter(owner=owner).count() == 4
+
+
+def test_replay_records_a_second_run_without_overwriting(owner, tmp_path):
+    path = write(tmp_path / "export.csv", report("10 juni 2024,08:00,130,85,70,,"))
+    import_report(owner, path)
+
+    result = import_report(owner, path, replay=True)
+
+    assert result["already_imported"] is None
+    assert (result["created"], result["skipped"], result["panels"]) == (0, 3, 0)
+    assert result["run"] == ImportRun.objects.filter(owner=owner).latest("imported_at")
     assert ImportRun.objects.filter(owner=owner).count() == 2
     assert Measurement.objects.filter(owner=owner).count() == 4
 
@@ -215,4 +229,4 @@ def test_coverage_refuses_an_unknown_owner(db):
 
 
 def test_stamp_shows_local_time():
-    assert stamp(datetime(2024, 6, 10, 8, 0, tzinfo=LOCAL)) == "2024-06-10 08:00"
+    assert stamp(datetime(2024, 6, 10, 8, 0, tzinfo=local_zone())) == "2024-06-10 08:00"

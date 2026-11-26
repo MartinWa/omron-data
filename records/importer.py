@@ -1,28 +1,49 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
 from hashlib import sha256
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+from django.conf import settings
 from django.db import transaction
 
 from parsing.report import Reading, parse_text
 
 from .models import COMPONENTS, METRICS, PANEL, ImportRun, Measurement
 
-LOCAL = ZoneInfo("Europe/Stockholm")
 VALUE_STEP = Decimal(1).scaleb(-Measurement._meta.get_field("value").decimal_places)
 COUNTS = ("created", "skipped", "conflicts", "overwritten", "panels")
+REPORTED = (*COUNTS, "invalid")
+CONFLICT = "conflict"
+INVALID = "invalid"
 
 
-def _local(at: datetime) -> datetime:
-    return at.replace(tzinfo=LOCAL)
+@dataclass(frozen=True)
+class Rejected:
+    kind: str
+    at: datetime
+    metric: str = ""
+    stored: Decimal | None = None
+    incoming: Decimal | None = None
+
+
+def local_zone() -> ZoneInfo:
+    return ZoneInfo(settings.OMRON_TIME_ZONE)
+
+
+def _local(at: datetime, tz: ZoneInfo) -> datetime:
+    return at.replace(tzinfo=tz)
 
 
 def _instant(at: datetime) -> datetime:
     return at.astimezone(UTC).replace(tzinfo=None)
+
+
+def _exists(at: datetime, tz: ZoneInfo) -> bool:
+    return at.replace(tzinfo=tz).astimezone(UTC).astimezone(tz).replace(tzinfo=None) == at
 
 
 def _stored(owner, first: datetime, last: datetime) -> dict[tuple[str, datetime], Measurement]:
@@ -32,13 +53,27 @@ def _stored(owner, first: datetime, last: datetime) -> dict[tuple[str, datetime]
 
 @transaction.atomic
 def import_readings(
-    owner, readings: list[Reading], *, overwrite: bool = False, run: ImportRun | None = None
+    owner,
+    readings: list[Reading],
+    *,
+    overwrite: bool = False,
+    run: ImportRun | None = None,
+    rejected: list[Rejected] | None = None,
 ) -> dict[str, int]:
-    counts = {"created": 0, "skipped": 0, "conflicts": 0, "panels": 0, "overwritten": 0}
+    tz = local_zone()
+    counts: dict[str, int] = dict.fromkeys(REPORTED, 0)
+    missing: set[datetime] = set()
 
     unique: dict[tuple[str, datetime], Reading] = {}
     for reading in readings:
-        key = (reading.metric, _instant(_local(reading.at)))
+        if not _exists(reading.at, tz):
+            if reading.at not in missing:
+                missing.add(reading.at)
+                counts[INVALID] += 1
+                if rejected is not None:
+                    rejected.append(Rejected(INVALID, reading.at))
+            continue
+        key = (reading.metric, _instant(_local(reading.at, tz)))
         if key in unique:
             counts["skipped"] += 1
             continue
@@ -53,6 +88,7 @@ def import_readings(
 
     rows: list[Measurement] = []
     changed: list[Measurement] = []
+    conflicted: set[tuple[str, datetime]] = set()
     for (metric, instant), reading in unique.items():
         value = reading.value.quantize(VALUE_STEP)
         row = existing.get((metric, instant))
@@ -61,7 +97,7 @@ def import_readings(
                 Measurement(
                     owner=owner,
                     metric=metric,
-                    at=_local(reading.at),
+                    at=_local(reading.at, tz),
                     value=value,
                     unit=METRICS[metric].unit,
                     note=reading.note,
@@ -78,14 +114,19 @@ def import_readings(
             counts["overwritten"] += 1
         else:
             counts["conflicts"] += 1
+            conflicted.add((metric, instant))
+            if rejected is not None:
+                rejected.append(
+                    Rejected(CONFLICT, _local(reading.at, tz), metric, row.value, value)
+                )
 
     notes: dict[datetime, str] = {}
     panel_at: dict[datetime, datetime] = {}
     for (metric, instant), reading in unique.items():
         if metric not in COMPONENTS:
             continue
-        panel_at.setdefault(instant, _local(reading.at))
-        if reading.note:
+        panel_at.setdefault(instant, _local(reading.at, tz))
+        if reading.note and (metric, instant) not in conflicted:
             notes.setdefault(instant, reading.note)
 
     panels: list[Measurement] = []
@@ -138,28 +179,29 @@ def import_readings(
     return counts
 
 
-def _span(readings: list[Reading]) -> tuple[datetime | None, datetime | None]:
-    if not readings:
+def _span(readings: list[Reading], tz: ZoneInfo) -> tuple[datetime | None, datetime | None]:
+    moments = [_local(reading.at, tz) for reading in readings if _exists(reading.at, tz)]
+    if not moments:
         return (None, None)
-    moments = [_local(reading.at) for reading in readings]
     return (min(moments), max(moments))
 
 
 @transaction.atomic
 def import_report(
-    owner, path: Path, *, overwrite: bool = False, dry_run: bool = False
+    owner, path: Path, *, overwrite: bool = False, replay: bool = False
 ) -> dict[str, object]:
     content = path.read_bytes()
     digest = sha256(content).hexdigest()
     result: dict[str, object] = {
         "file_name": path.name,
         "readings": 0,
-        **dict.fromkeys(COUNTS, 0),
+        **dict.fromkeys(REPORTED, 0),
+        "rejected": [],
         "run": None,
         "already_imported": None,
     }
 
-    if not overwrite:
+    if not (overwrite or replay):
         prior = (
             ImportRun.objects.filter(owner=owner, content_sha256=digest)
             .order_by("-imported_at")
@@ -172,13 +214,7 @@ def import_report(
     readings = parse_text(content.decode("utf-8-sig"))
     result["readings"] = len(readings)
 
-    if dry_run:
-        with transaction.atomic():
-            result.update(import_readings(owner, readings, overwrite=overwrite))
-            transaction.set_rollback(True)
-        return result
-
-    first_at, last_at = _span(readings)
+    first_at, last_at = _span(readings, local_zone())
     run = ImportRun.objects.create(
         owner=owner,
         file_name=path.name,
@@ -187,10 +223,12 @@ def import_report(
         first_at=first_at,
         last_at=last_at,
     )
-    counts = import_readings(owner, readings, overwrite=overwrite, run=run)
+    rejected: list[Rejected] = []
+    counts = import_readings(owner, readings, overwrite=overwrite, run=run, rejected=rejected)
     result.update(counts)
-    for field, value in counts.items():
-        setattr(run, field, value)
-    run.save(update_fields=list(counts))
+    result["rejected"] = rejected
+    for field in COUNTS:
+        setattr(run, field, counts[field])
+    run.save(update_fields=list(COUNTS))
     result["run"] = run
     return result

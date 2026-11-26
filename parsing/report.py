@@ -4,8 +4,9 @@ A report is a sequence of unnamed sections, each introduced by its own header ro
 section is identified from that header before its columns are mapped by name:
 
 - ``Systoliskt tryck (mmHg)`` — blood pressure, the only section that carries a note, read
-  from the first populated of ``Anmärkningar``, ``Mätläge`` and ``Måläge``. A header naming
-  none of those carries no note, because nothing is read by position.
+  from the first populated of ``Anmärkningar``, ``Mätläge`` and ``Måläge``. That order is
+  the priority, wherever the columns sit in the header. A header naming none of those
+  carries no note, because nothing is read by position.
 - ``Temperatur ()`` — body temperature.
 - ``Mätdatum`` — body composition, detail shape (53 columns).
 - ``Vikt (kg)`` or ``Vikt (lbs)`` without ``Mätdatum`` — body composition, summary shape.
@@ -38,8 +39,10 @@ so mapping them now would be guessing rather than reading: ``Kategori``, ``Käll
 A report holding no content at all — an empty file, or one of blank lines only — yields no
 readings, because an empty export is legitimate. Any other report that names no section this
 parser recognises raises :class:`UnknownReportError` instead of pretending it was parsed, and
-the import command turns that into a ``CommandError``. That covers a row of unrelated columns
-as much as a recognisable date header with no measurement section under it.
+the import command turns that into a ``CommandError``. A header names a section only when it
+also carries a measurement column, so a bare date header is not a supported export, while the
+same header with an empty measurement column under it is an export that happens to be empty.
+That also covers a row of unrelated columns.
 """
 
 from __future__ import annotations
@@ -170,7 +173,14 @@ def _is_data(row: list[str]) -> bool:
     return bool(row) and row[0].strip()[:1].isdigit()
 
 
+def _measurement(name: str) -> bool:
+    metric = _metric(name)
+    return metric is not None and metric not in RESERVED
+
+
 def _section(header: list[str]) -> str | None:
+    if not any(_measurement(name) for name in header):
+        return None
     if "Systoliskt tryck (mmHg)" in header:
         return "blood_pressure"
     if any(name.startswith(TEMPERATURE_HEAD) for name in header):
@@ -231,9 +241,11 @@ def _values(row: list[str], index: dict[str, list[int]]) -> tuple[dict[str, Deci
     return values, converted
 
 
-def _note(row: list[str], index: dict[str, list[int]]) -> str:
-    for position in index.get("note", []):
-        if position < len(row):
+def _note(row: list[str], header: list[str]) -> str:
+    for spelling in ALIASES["note"]:
+        for position, name in enumerate(header):
+            if name != spelling or position >= len(row):
+                continue
             text = _text(row[position])
             if text:
                 return text
@@ -269,7 +281,7 @@ def parse_text(text: str) -> list[Reading]:
         at = _moment(_first(row, index.get("at")), _first(row, index.get("time")))
         if at is None:
             continue
-        note = _note(row, index) if "systolic_bp" in index else ""
+        note = _note(row, header) if "systolic_bp" in index else ""
         values, converted = _values(row, index)
         for metric, value in values.items():
             key = (at, metric)

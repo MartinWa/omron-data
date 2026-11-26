@@ -7,6 +7,7 @@ SECRET_KEY = os.environ.get("OMRON_SECRET_KEY", "dev-only-insecure-key-000000000
 DEBUG = os.environ.get("OMRON_DEBUG") == "1"
 _hosts = os.environ.get("OMRON_ALLOWED_HOSTS", "127.0.0.1,localhost")
 ALLOWED_HOSTS = [host for host in _hosts.split(",") if host]
+OMRON_TIME_ZONE = os.environ.get("OMRON_TIME_ZONE", "Europe/Stockholm")
 
 INSTALLED_APPS = [
     "django.contrib.auth",
@@ -55,7 +56,7 @@ Path(DATABASES["default"]["NAME"]).parent.mkdir(parents=True, exist_ok=True)
 AUTH_PASSWORD_VALIDATORS: list[dict[str, str]] = []
 
 LANGUAGE_CODE = "en-us"
-TIME_ZONE = "Europe/Stockholm"
+TIME_ZONE = OMRON_TIME_ZONE
 USE_I18N = True
 USE_TZ = True
 

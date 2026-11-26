@@ -6,6 +6,7 @@ services:
     environment:
       - OMRON_SECRET_KEY
       - OMRON_ALLOWED_HOSTS
+      - OMRON_TIME_ZONE
       - OMRON_DB_PATH=/app/data/omron.sqlite3
     volumes:
       - ./data:/app/data

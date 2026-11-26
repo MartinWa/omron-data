@@ -46,7 +46,8 @@ uv run waitress-serve --port 8000 omron_data.wsgi:application
 ```
 
 Set `OMRON_SECRET_KEY` and `OMRON_ALLOWED_HOSTS` in the environment; `OMRON_DB_PATH`
-overrides the database location (default `.data/db.sqlite3`).
+overrides the database location (default `.data/db.sqlite3`) and `OMRON_TIME_ZONE` sets the
+zone the export's wall clocks are read in (default `Europe/Stockholm`).
 
 ## API
 
@@ -71,10 +72,10 @@ Rapport (20 juni, 2024 – 1 juli, 2024).csv: 21 readings, 18 created, 3 skipped
 ```
 
 `skipped` means the reading was already stored, byte for byte, and nothing was written.
-`conflicts` means the file disagreed with what is stored: the stored value is kept and the
-count tells you how many need a look. `--overwrite` applies the file's values instead, and
-`--dry-run` reports the counts without writing anything, so a first import can be inspected
-before it lands.
+`conflicts` means the file disagreed with what is stored: the stored value is kept, and each
+one is printed with its timestamp and both values so you can look at it. `--overwrite`
+applies the file's values instead, and `--dry-run` reports the counts without writing
+anything, so a first import can be inspected before it lands.
 
 ## Import history
 
@@ -85,11 +86,18 @@ import free — a file whose checksum is already in the ledger is not read again
 ```sh
 uv run python manage.py coverage --owner alice
 uv run python manage.py purge_import --id 4 --owner alice --dry-run
+uv run python manage.py import_omron /path/to/exports --owner alice --replay
 ```
 
 `coverage` lists each metric with its first and last reading and every gap longer than a
 week. `purge_import` deletes exactly the rows one import created, which is how a wrong file
 is undone without disturbing anything imported before or since.
+
+A known file is normally skipped, because reading it again cannot add anything. Two cases
+want it anyway: a purge may have removed readings that a later window also contains, and a
+new version of this tool may understand columns that older imports dropped. `--replay`
+imports a known file again without overwriting a single stored value, so it can only fill
+gaps.
 
 ## Development
 
