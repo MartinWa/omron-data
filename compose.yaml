@@ -9,6 +9,7 @@ services:
       - OMRON_ALLOWED_HOSTS
       - OMRON_CSRF_TRUSTED_ORIGINS
       - OMRON_TIME_ZONE
+      - OMRON_TRUSTED_PROXY
     volumes:
       - ./data:/app/data
     restart: unless-stopped

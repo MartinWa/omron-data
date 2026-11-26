@@ -54,6 +54,7 @@ directory is not writable by the UID it runs as.
 | `OMRON_SECRET_KEY` | none, required | Django secret. Generate one per installation: `python -c "import secrets; print(secrets.token_urlsafe(48))"`. A published placeholder is rejected, so the value in `.env.example` cannot start a container |
 | `OMRON_SECRET_KEY_FILE` | empty | Path to a file holding the secret, for Docker or Podman secrets. Read only when `OMRON_SECRET_KEY` is empty. Every setting accepts the same `<NAME>_FILE` form |
 | `OMRON_ALLOWED_HOSTS` | `127.0.0.1,localhost` | Comma-separated hostnames the proxy forwards, for example `omron.example.com`. A request with any other `Host` header is refused |
+| `OMRON_TRUSTED_PROXY` | empty | The address of the reverse proxy that may set `X-Forwarded-Proto` and `X-Forwarded-For`, or `*` for any peer. Required for HTTPS behind a proxy: waitress discards both headers unless the peer is named here, and without them every browser `POST` fails the CSRF origin check. See [Proxy headers](#proxy-headers) |
 | `OMRON_CSRF_TRUSTED_ORIGINS` | empty | Comma-separated `https://` origins; needed only when the proxy rewrites the `Host` header |
 | `OMRON_TIME_ZONE` | `Europe/Stockholm` | IANA zone name. The export records wall-clock times with no offset, so imports are read in this zone, impossible timestamps are reported against it, and every date in the UI is rendered in it, while the API answers in UTC with a `Z` suffix. It applies at import time: changing it later does not rewrite stored rows |
 | `OMRON_DEBUG` | `false` | Set by the development image only. With it on, a fixed development secret is accepted and the session and CSRF cookies are not `Secure`; never enable it on an instance that is reachable |
@@ -197,8 +198,26 @@ not bind the port to `0.0.0.0`.
 
 Forward the original `Host` and the client's `X-Forwarded-Proto` on every request; the
 application reads that header rather than trusting a scheme of its own. With `OMRON_DEBUG`
-off the session and CSRF cookies are `Secure`, so the app has to be served over HTTPS. The
-upstream below is `web:8000` for a proxy in a shared Docker network; use
+off the session and CSRF cookies are `Secure`, so the app has to be served over HTTPS.
+
+waitress strips `X-Forwarded-Proto` and `X-Forwarded-For` from any peer it has not been told
+to trust, so declare the proxy or the browser's `POST` will fail the CSRF origin check and
+you will see "CSRF verification failed" after every login attempt:
+
+```sh
+# any peer may set the header: right for a proxy on a private Docker network
+OMRON_TRUSTED_PROXY=*
+
+# or name the proxy's address, which is stricter when the port is published
+OMRON_TRUSTED_PROXY=172.20.0.4
+```
+
+Only the last hop is read (`trusted_proxy_count` is 1), so a client cannot forge the scheme
+by sending its own header past the proxy. `OMRON_CSRF_TRUSTED_ORIGINS` stays empty for the
+usual single-host setup: once the scheme is right, the browser's own origin matches the
+request and no extra origin list is needed.
+
+The upstream below is `web:8000` for a proxy in a shared Docker network; use
 `http://127.0.0.1:8000` for a proxy on the host:
 
 ```nginx

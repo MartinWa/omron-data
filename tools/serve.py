@@ -33,6 +33,18 @@ def positive_int(name: str, default: int) -> int:
     return value
 
 
+def proxy_options() -> dict:
+    trusted = settings.OMRON_TRUSTED_PROXY
+    if not trusted:
+        return {}
+    return {
+        "trusted_proxy": trusted,
+        "trusted_proxy_count": 1,
+        "trusted_proxy_headers": {"x-forwarded-proto", "x-forwarded-for"},
+        "clear_untrusted_proxy_headers": True,
+    }
+
+
 def database_path() -> Path:
     return Path(settings.DATABASES["default"]["NAME"])
 
@@ -64,6 +76,7 @@ def main() -> int:
         channel_timeout=CHANNEL_TIMEOUT_SECONDS,
         max_request_body_size=MAX_REQUEST_BODY_BYTES,
         ident="omron-data",
+        **proxy_options(),
     )
     return 0
 

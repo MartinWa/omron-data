@@ -80,6 +80,7 @@ def default_time_zone() -> str:
 
 OMRON_TIME_ZONE = default_time_zone()
 OMRON_VERSION = read_setting("OMRON_VERSION")
+OMRON_TRUSTED_PROXY = read_setting("OMRON_TRUSTED_PROXY")
 
 INSTALLED_APPS = [
     "django.contrib.admin",
