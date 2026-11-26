@@ -212,6 +212,9 @@ jobs:
             --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml"
       # Only a signed and verified index becomes the release version, so the tag
       # never advertises an image whose attestations are missing or broken.
+      # The candidate tag is not removed afterwards: in GHCR a version owns its
+      # tags, so deleting the candidate would delete the release with it. It stays
+      # as a second name for the same digest.
       - name: Promote the verified index to the version and latest
         id: push
         if: steps.existing.outputs.published != 'true'
@@ -221,6 +224,11 @@ jobs:
         run: |
           docker buildx imagetools create \
             --tag "$IMAGE:$VERSION" --tag "$IMAGE:latest" "$IMAGE@$DIGEST"
+          promoted=$(docker buildx imagetools inspect "$IMAGE:$VERSION" --format '{{json .Manifest.Digest}}' | tr -d '"')
+          if [ "$promoted" != "$DIGEST" ]; then
+            echo "::error::$IMAGE:$VERSION resolves to $promoted, not to the attested $DIGEST."
+            exit 1
+          fi
           printf 'digest=%s\n' "$DIGEST" >> "$GITHUB_OUTPUT"
           printf 'Published %s:%s and %s:latest as %s\n' "$IMAGE" "$VERSION" "$IMAGE" "$DIGEST" \
             >> "$GITHUB_STEP_SUMMARY"
