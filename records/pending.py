@@ -10,17 +10,24 @@ from hashlib import sha256
 from pathlib import Path
 
 PENDING_TTL_SECONDS = 3600
+STAGING_DIR_NAME = "omron-data-pending"
+MARKER_NAME = ".omron-data-pending"
+MARKER_TEXT = "omron-data staging directory, created by the app; safe to delete when it is idle\n"
 IMPORT_ID_PATTERN = re.compile(r"[A-Za-z0-9_-]{16,64}")
 NAME_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,99}")
 SUMMARY_NAME = "summary.json"
 FALLBACK_NAME = "export"
 
 
-def pending_root() -> Path:
+def pending_base() -> Path:
     configured = os.environ.get("OMRON_PENDING_DIR")
     if configured:
         return Path(configured)
-    return Path(tempfile.gettempdir()) / "omron-data-pending"
+    return Path(tempfile.gettempdir())
+
+
+def pending_root() -> Path:
+    return pending_base() / STAGING_DIR_NAME
 
 
 def new_import_id() -> str:
@@ -37,6 +44,10 @@ def safe_name(name: str) -> str:
         base = base[:-4]
     cleaned = re.sub(r"[^A-Za-z0-9._-]+", "-", base).strip("._-")
     return f"{cleaned[:100] or FALLBACK_NAME}.csv"
+
+
+def _owned(folder: Path) -> bool:
+    return (folder / MARKER_NAME).is_file()
 
 
 def _folder(import_id: str) -> Path | None:
@@ -69,6 +80,10 @@ def save(import_id: str, name: str, content: bytes) -> Path:
     folder.mkdir(parents=True, exist_ok=True, mode=0o700)
     with contextlib.suppress(OSError):
         folder.chmod(0o700)
+    marker = folder / MARKER_NAME
+    marker.write_text(MARKER_TEXT, encoding="utf-8")
+    with contextlib.suppress(OSError):
+        marker.chmod(0o600)
     path.write_bytes(content)
     path.chmod(0o600)
     return path
@@ -119,7 +134,7 @@ def load_summary(import_id: str) -> dict | None:
 
 def discard(import_id: str) -> None:
     folder = _folder(import_id)
-    if folder is None:
+    if folder is None or not _owned(folder):
         return
     shutil.rmtree(folder, ignore_errors=True)
 
@@ -132,13 +147,14 @@ def purge_stale(ttl_seconds: int = PENDING_TTL_SECONDS) -> int:
     cutoff = time.time() - ttl_seconds
     removed = 0
     for entry in entries:
+        if entry.is_symlink() or not IMPORT_ID_PATTERN.fullmatch(entry.name):
+            continue
         try:
+            if not entry.is_dir() or not _owned(entry):
+                continue
             if entry.stat().st_mtime >= cutoff:
                 continue
-            if entry.is_dir():
-                shutil.rmtree(entry, ignore_errors=True)
-            else:
-                entry.unlink(missing_ok=True)
+            shutil.rmtree(entry, ignore_errors=True)
             removed += 1
         except OSError:
             continue

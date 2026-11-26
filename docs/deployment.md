@@ -63,7 +63,7 @@ directory is not writable by the UID it runs as.
 | `OMRON_VERSION` | empty, which falls back to the version in `pyproject.toml`; the image sets it from the build argument, `development` by default | Shown in the footer |
 | `OMRON_PORT` | `8000` | Listen port inside the container, used by the server and by the health check. Leave it alone: `compose.host-port.yaml` publishes container port 8000 |
 | `OMRON_THREADS` | `8` | Worker threads the server starts |
-| `OMRON_PENDING_DIR` | `<system temp>/omron-data-pending` | Where an upload is staged until its preview is confirmed, cancelled or expires. Inside the container this is the `/tmp` tmpfs, so a staged file does not survive a restart |
+| `OMRON_PENDING_DIR` | the system temp directory | Parent of the staging area. The app writes only inside its own `omron-data-pending` subdirectory of it, and cleanup deletes nothing outside that subdirectory: a value such as `/app/data` is safe. Inside the container the default is the `/tmp` tmpfs, so a staged file does not survive a restart |
 | `OMRON_IMAGE` | `ghcr.io/martinwa/omron-data:latest` | Image tag or digest to deploy. Compose only |
 | `OMRON_HOST_PORT` | `8000` | Loopback port, used only with `compose.host-port.yaml` |
 | `OMRON_NETWORK` | `omron-data` | Name of the Docker network Compose creates for the app |

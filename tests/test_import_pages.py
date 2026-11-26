@@ -1,4 +1,5 @@
 import json
+import os
 import time
 from datetime import datetime, timedelta
 from decimal import Decimal
@@ -50,7 +51,7 @@ def upload(client, text: str = FRESH, name: str = "export.csv"):
 
 
 def staged(tmp_path) -> list[Path]:
-    root = tmp_path / "pending"
+    root = tmp_path / "pending" / "omron-data-pending"
     return sorted(root.iterdir()) if root.exists() else []
 
 
@@ -289,15 +290,93 @@ def test_a_valid_export_is_staged_outside_the_repository_and_redirects_to_the_pr
     assert response.status_code == 302
     assert response.url == reverse("import_preview")
     stored = client.session["pending_import"]
-    folder = tmp_path / "pending" / stored["id"]
+    folder = tmp_path / "pending" / "omron-data-pending" / stored["id"]
     assert folder.is_dir()
-    assert sorted(child.name for child in folder.iterdir()) == ["export.csv", "summary.json"]
+    assert sorted(child.name for child in folder.iterdir()) == [
+        ".omron-data-pending",
+        "export.csv",
+        "summary.json",
+    ]
     assert stored["fingerprint"] == sha256(FRESH.encode()).hexdigest()
     assert stored["created_at"] <= time.time()
     assert str(settings.BASE_DIR) not in str(folder)
-    assert pending.pending_root() == tmp_path / "pending"
+    assert pending.pending_root() == tmp_path / "pending" / "omron-data-pending"
     assert Measurement.objects.filter(owner=alice).count() == before_rows
     assert ImportRun.objects.filter(owner=alice).count() == before_runs
+
+
+def test_the_staging_area_is_an_application_subdirectory_of_the_configured_base(
+    tmp_path, monkeypatch
+):
+    base = tmp_path / "data"
+    monkeypatch.setenv("OMRON_PENDING_DIR", str(base))
+
+    import_id = pending.new_import_id()
+    pending.save(import_id, "export.csv", b"Datum\n")
+
+    root = base / "omron-data-pending"
+    assert pending.pending_root() == root
+    assert (root / import_id / "export.csv").is_file()
+    assert (root / import_id / ".omron-data-pending").is_file()
+
+
+def test_purge_stale_leaves_a_foreign_database_and_directory_in_the_configured_base(
+    tmp_path, monkeypatch
+):
+    base = tmp_path / "data"
+    base.mkdir()
+    monkeypatch.setenv("OMRON_PENDING_DIR", str(base))
+    database = base / "omron.sqlite3"
+    database.write_bytes(b"SQLite format 3\0")
+    backups = base / "backups"
+    backups.mkdir()
+    (backups / "old.csv").write_text("Datum\n", encoding="utf-8")
+    old = time.time() - pending.PENDING_TTL_SECONDS - 60
+    os.utime(database, (old, old))
+    os.utime(backups, (old, old))
+
+    removed = pending.purge_stale()
+
+    assert removed == 0
+    assert database.read_bytes() == b"SQLite format 3\0"
+    assert (backups / "old.csv").is_file()
+
+
+def test_purge_stale_removes_a_staged_import_older_than_the_ttl(tmp_path):
+    import_id = pending.new_import_id()
+    path = pending.save(import_id, "export.csv", b"Datum\n")
+    old = time.time() - pending.PENDING_TTL_SECONDS - 60
+    os.utime(path.parent, (old, old))
+
+    removed = pending.purge_stale()
+
+    assert removed == 1
+    assert not (pending.pending_root() / import_id).exists()
+
+
+def test_purge_stale_keeps_a_fresh_staged_import():
+    import_id = pending.new_import_id()
+    pending.save(import_id, "export.csv", b"Datum\n")
+
+    removed = pending.purge_stale()
+
+    assert removed == 0
+    assert (pending.pending_root() / import_id / "export.csv").is_file()
+
+
+def test_purge_stale_keeps_a_pattern_shaped_directory_the_application_did_not_create():
+    root = pending.pending_root()
+    root.mkdir(parents=True, exist_ok=True)
+    impostor = root / ("a" * 22)
+    impostor.mkdir()
+    (impostor / "export.csv").write_text("Datum\n", encoding="utf-8")
+    old = time.time() - pending.PENDING_TTL_SECONDS - 60
+    os.utime(impostor, (old, old))
+
+    removed = pending.purge_stale()
+
+    assert removed == 0
+    assert (impostor / "export.csv").is_file()
 
 
 @pytest.mark.django_db
@@ -329,7 +408,7 @@ def test_the_preview_get_writes_nothing(client, alice, tmp_path):
     client.force_login(alice)
     upload(client)
     stored = client.session["pending_import"]
-    folder = tmp_path / "pending" / stored["id"]
+    folder = tmp_path / "pending" / "omron-data-pending" / stored["id"]
     before_files = {child.name: child.read_bytes() for child in folder.iterdir()}
     before_rows = Measurement.objects.count()
     before_runs = ImportRun.objects.count()
