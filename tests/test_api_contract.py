@@ -285,6 +285,31 @@ def test_the_api_root_names_the_contract_and_the_endpoints(auth):
     assert "/api/v1/measurements" in body["endpoints"]
 
 
+def test_the_metric_filter_advertises_the_registry(auth):
+    schema = auth.get("/api/v1/openapi.json").json()
+    parameters = schema["paths"]["/api/v1/measurements"]["get"]["parameters"]
+    metric = next(parameter for parameter in parameters if parameter["name"] == "metric")
+
+    assert metric["schema"]["enum"] == sorted(METRICS)
+    assert auth.get(f"/api/v1/measurements?metric={sorted(METRICS)[0]}").status_code == 200
+    assert auth.get("/api/v1/measurements?metric=not_a_metric").status_code == 422
+
+
+def test_the_openapi_version_is_the_contract_version(auth):
+    schema = auth.get("/api/v1/openapi.json").json()
+    envelope = auth.get("/api/v1/").json()
+
+    assert schema["info"]["version"] == CONTRACT_VERSION
+    assert schema["info"]["version"] == envelope["contract_version"]
+
+
+def test_the_renamed_metric_codes_are_a_breaking_contract_change(auth):
+    assert auth.get("/api/v1/").json()["contract_version"] == CONTRACT_VERSION
+    assert auth.get("/api/v1/measurements?metric=fat_mass").status_code == 200
+    assert auth.get("/api/v1/measurements?metric=fat_free_mass").status_code == 422
+    assert auth.get("/api/v1/measurements?metric=average_weight").status_code == 422
+
+
 def test_an_unknown_api_path_is_json_with_the_envelope(auth):
     response = auth.get("/api/v1/nothing-here")
 

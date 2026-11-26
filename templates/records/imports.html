@@ -2,24 +2,52 @@
 {% load assets formatting %}
 {% block title %}Imports — omron-data{% endblock %}
 {% block scripts %}
+<script src="{% asset 'records/upload.js' %}" defer></script>
 <script src="{% asset 'records/delete.js' %}" defer></script>
 {% endblock %}
 {% block content %}
 <div class="page-head">
   <h1>Imports</h1>
-  <p class="lede">One row per OMRON connect CSV export you have imported, newest first.</p>
+  <p class="lede">Choose an OMRON connect CSV export to review it, and see every export you have already imported.</p>
 </div>
 
-<div class="actions">
-  <a class="btn btn-primary" href="{% url 'import_upload' %}">Import a CSV export</a>
+<div class="card">
+  <div class="card-head">
+    <h2>Import a CSV export</h2>
+  </div>
+  <form method="post" enctype="multipart/form-data" class="form"
+        data-upload-form
+        data-max-bytes="{{ max_upload_bytes }}"
+        data-too-large="{{ too_large_message }}">
+    {% csrf_token %}
+    <div class="dropzone" data-dropzone>
+      <p class="dropzone-hint">Drag a CSV export here, or choose a file below.</p>
+      {% include "partials/field.html" with field=form.csv_file force_invalid=too_large client_error=True %}
+    </div>
+    <noscript>
+      <div class="actions">
+        <button class="btn btn-primary" type="submit">Preview</button>
+      </div>
+    </noscript>
+  </form>
+
+  <details class="export-help">
+    <summary>How to export from OMRON connect</summary>
+    <ol>
+      <li>Open the OMRON connect app and pair your blood pressure monitor or scale.</li>
+      <li>Open <em>Settings</em>, then <em>Data export</em>; some versions label it <em>Export data</em> or <em>CSV export</em>.</li>
+      <li>Save the CSV file the app hands you, then choose that file above to see the preview.</li>
+    </ol>
+    <p>One file holds every reading the app has stored, up to {{ max_upload_megabytes }} MB.</p>
+    <p class="hint">Nothing is written until you confirm on the preview page.</p>
+  </details>
 </div>
 
 {% if not has_runs %}
 <div class="empty">
   <svg class="empty-icon" width="38" height="38" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 3.5v10m0 0l-3.5-3.5M12 13.5l3.5-3.5M4 16.5v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>
   <p>No imports yet.</p>
-  <p class="small">An export is parsed and counted on a preview page before anything is written.</p>
-  <a class="btn btn-primary" href="{% url 'import_upload' %}">Import a CSV export</a>
+  <p class="small">Choose your first export above: it is parsed and counted on a preview page before anything is written.</p>
 </div>
 {% else %}
 <div class="card">

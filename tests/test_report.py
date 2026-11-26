@@ -54,7 +54,7 @@ def test_weight_rows_use_decimal_comma():
     assert found["body_fat_pct"] == Decimal("21.3")
     assert found["impedance"] == Decimal("402.5")
     assert found["visceral_fat"] == Decimal("9")
-    assert "fat_free_mass" in found
+    assert "fat_mass" in found
 
 
 def test_skips_missing_and_ignores_headers():
@@ -99,14 +99,14 @@ def test_summary_section_metrics():
 def test_detail_section_metrics():
     assert metrics(DETAIL) == {
         "body_weight",
-        "average_weight",
+        "average_weight_reported",
         "bmi",
         "body_fat_pct",
         "skeletal_muscle_pct",
         "visceral_fat",
         "resting_metabolism",
-        "fat_free_mass",
-        "average_fat_free_mass",
+        "fat_mass",
+        "average_fat_mass",
         "impedance",
     }
 
@@ -154,7 +154,7 @@ def test_duplicated_header_reads_the_first_populated_column():
         '25 nov. 2026,07:43,"64,8","142,8","99,9"\r\n'
     )
 
-    assert values(text)["fat_free_mass"] == Decimal("64.8")
+    assert values(text)["fat_mass"] == Decimal("64.8")
 
 
 def test_duplicated_header_falls_back_to_the_second_column():
@@ -163,7 +163,7 @@ def test_duplicated_header_falls_back_to_the_second_column():
         '25 nov. 2026,07:43,-,-,"64,85"\r\n'
     )
 
-    assert values(text)["fat_free_mass"] == Decimal("64.85")
+    assert values(text)["fat_mass"] == Decimal("64.85")
 
 
 def test_body_fat_and_skeletal_muscle_aliases():
@@ -380,5 +380,5 @@ def test_body_temperature_and_water_are_stored():
 def test_average_metrics_are_stored():
     found = values(DETAIL)
 
-    assert found["average_weight"] == Decimal("82.3")
-    assert found["average_fat_free_mass"] == Decimal("64.9")
+    assert found["average_weight_reported"] == Decimal("82.3")
+    assert found["average_fat_mass"] == Decimal("64.9")

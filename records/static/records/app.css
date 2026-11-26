@@ -7,9 +7,9 @@
   --border-strong: #c6ced9;
   --text: #171a1f;
   --muted: #5c6875;
-  --accent: #2f5fd0;
-  --accent-hover: #24499f;
-  --accent-soft: #e8eefc;
+  --accent: #0f766e;
+  --accent-hover: #115e59;
+  --accent-soft: #e7f5f2;
   --accent-contrast: #ffffff;
   --danger: #b3261e;
   --danger-soft: #fdecea;
@@ -36,10 +36,10 @@
     --border-strong: #3b444f;
     --text: #e7ebf0;
     --muted: #9aa6b4;
-    --accent: #7ea6f8;
-    --accent-hover: #9dbcfb;
-    --accent-soft: #1e2a42;
-    --accent-contrast: #0e1218;
+    --accent: #5eead4;
+    --accent-hover: #99f6e4;
+    --accent-soft: #13312d;
+    --accent-contrast: #06231f;
     --danger: #f4b3ae;
     --danger-soft: #3a1f1d;
     --success: #86e0ae;
@@ -60,10 +60,10 @@
   --border-strong: #3b444f;
   --text: #e7ebf0;
   --muted: #9aa6b4;
-  --accent: #7ea6f8;
-  --accent-hover: #9dbcfb;
-  --accent-soft: #1e2a42;
-  --accent-contrast: #0e1218;
+  --accent: #5eead4;
+  --accent-hover: #99f6e4;
+  --accent-soft: #13312d;
+  --accent-contrast: #06231f;
   --danger: #f4b3ae;
   --danger-soft: #3a1f1d;
   --success: #86e0ae;
@@ -605,11 +605,13 @@ main.container {
   white-space: nowrap;
 }
 
-.table tbody tr:last-child td {
+.table tbody:last-of-type tr:last-child td,
+.table tbody:last-of-type tr:last-child th {
   border-bottom: 0;
 }
 
-.table tbody tr:hover td {
+.table tbody tr:hover td,
+.table tbody tr:hover th[scope="row"] {
   background: color-mix(in srgb, var(--accent-soft) 45%, transparent);
 }
 
@@ -1303,6 +1305,16 @@ a.pager-page:hover {
   color: var(--text);
   font-size: 0.9rem;
   font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+  white-space: normal;
+}
+
+.table tbody th[scope="row"] {
+  background: transparent;
+  color: var(--text);
+  font-size: 0.9rem;
+  font-weight: 400;
   letter-spacing: 0;
   text-transform: none;
   white-space: normal;
@@ -2181,7 +2193,7 @@ a.pager-page:hover {
     --border-strong: #999;
     --text: #000;
     --muted: #333;
-    --accent: #1a3f96;
+    --accent: #0f766e;
     --accent-soft: #fff;
     --danger: #8a1a14;
     --danger-soft: #fff;
@@ -2278,6 +2290,10 @@ a.pager-page:hover {
 
   .session > .session-head::before {
     display: none;
+  }
+
+  details[data-print-open]::details-content {
+    content-visibility: visible;
   }
 
   .badge {

@@ -49,6 +49,6 @@ class ImportRunAdmin(ReadOnlyAdmin):
 
 @admin.register(ApiToken)
 class ApiTokenAdmin(ReadOnlyAdmin):
-    list_display = ("name", "prefix", "owner", "created_at", "revoked")
-    list_filter = ("revoked", "owner")
+    list_display = ("name", "prefix", "owner", "created_at", "expires_at", "revoked_at")
+    list_filter = ("owner", "revoked_at", "expires_at")
     search_fields = ("name", "prefix")

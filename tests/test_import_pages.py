@@ -47,7 +47,7 @@ def csv_file(text: str, name: str = "export.csv") -> SimpleUploadedFile:
 
 
 def upload(client, text: str = FRESH, name: str = "export.csv"):
-    return client.post(reverse("import_upload"), {"csv_file": csv_file(text, name)})
+    return client.post(reverse("imports"), {"csv_file": csv_file(text, name)})
 
 
 def staged(tmp_path) -> list[Path]:
@@ -185,7 +185,7 @@ def test_a_capped_summary_stays_far_below_the_rendered_page_size(client, alice, 
 
 @pytest.mark.django_db
 def test_the_import_pages_send_anonymous_visitors_to_the_login_page(client):
-    for name in ("imports", "import_upload", "import_preview"):
+    for name in ("imports", "import_preview"):
         response = client.get(reverse(name))
 
         assert response.status_code == 302
@@ -193,12 +193,12 @@ def test_the_import_pages_send_anonymous_visitors_to_the_login_page(client):
 
 
 @pytest.mark.django_db
-def test_the_upload_page_states_the_size_limit_and_offers_a_submit_without_javascript(
+def test_the_imports_page_states_the_size_limit_and_offers_a_submit_without_javascript(
     client, alice
 ):
     client.force_login(alice)
 
-    content = client.get(reverse("import_upload")).content.decode()
+    content = client.get(reverse("imports")).content.decode()
 
     assert f"Up to {MAX_UPLOAD_MEGABYTES} MB" in content
     assert 'accept=".csv,text/csv"' in content
@@ -213,7 +213,7 @@ def test_an_oversized_request_body_is_refused_before_the_upload_is_read(client, 
     before = ImportRun.objects.filter(owner=alice).count()
 
     response = client.post(
-        reverse("import_upload"),
+        reverse("imports"),
         {"csv_file": csv_file(FRESH)},
         CONTENT_LENGTH=str(MAX_UPLOAD_BYTES + MULTIPART_OVERHEAD_BYTES + 1),
     )
@@ -231,7 +231,7 @@ def test_a_file_that_names_no_omron_section_reports_the_parser_message(client, a
     before = ImportRun.objects.filter(owner=alice).count()
 
     response = client.post(
-        reverse("import_upload"),
+        reverse("imports"),
         {"csv_file": csv_file("Datum,Tid\n2024-06-03,08:00\n")},
     )
 
@@ -249,7 +249,7 @@ def test_a_file_that_is_not_utf8_is_reported_as_text_the_parser_cannot_read(
     client.force_login(alice)
 
     response = client.post(
-        reverse("import_upload"),
+        reverse("imports"),
         {
             "csv_file": SimpleUploadedFile(
                 "export.csv", b"\xff\xfe\x00Datum", content_type="text/csv"
@@ -268,7 +268,7 @@ def test_an_export_with_no_data_rows_is_refused_before_anything_is_staged(client
     client.force_login(alice)
     before = ImportRun.objects.filter(owner=alice).count()
 
-    response = client.post(reverse("import_upload"), {"csv_file": csv_file(report())})
+    response = client.post(reverse("imports"), {"csv_file": csv_file(report())})
 
     assert response.status_code == 200
     assert NO_ROWS_MESSAGE in response.content.decode()
@@ -522,13 +522,13 @@ def test_cancelling_discards_the_staged_file_and_imports_nothing(client, alice, 
     )
 
     assert response.status_code == 302
-    assert response.url == reverse("import_upload")
+    assert response.url == reverse("imports")
     assert "pending_import" not in client.session
     assert staged(tmp_path) == []
     assert ImportRun.objects.filter(owner=alice).count() == before
     assert (
         "Preview discarded. Nothing was imported."
-        in client.get(reverse("import_upload")).content.decode()
+        in client.get(reverse("imports")).content.decode()
     )
 
 
@@ -538,7 +538,7 @@ def test_a_preview_without_a_staged_upload_asks_for_the_csv_again(client, alice)
 
     response = client.get(reverse("import_preview"), follow=True)
 
-    assert response.redirect_chain[-1][0] == reverse("import_upload")
+    assert response.redirect_chain[-1][0] == reverse("imports")
     assert PREVIEW_MISSING_MESSAGE in response.content.decode()
 
 
@@ -553,7 +553,7 @@ def test_a_preview_whose_staged_file_changed_is_called_stale(client, alice, tmp_
 
     response = client.get(reverse("import_preview"), follow=True)
 
-    assert response.redirect_chain[-1][0] == reverse("import_upload")
+    assert response.redirect_chain[-1][0] == reverse("imports")
     assert PREVIEW_STALE_MESSAGE in response.content.decode()
     assert staged(tmp_path) == []
     assert "pending_import" not in client.session
@@ -573,7 +573,7 @@ def test_a_preview_older_than_an_hour_is_called_expired(client, alice, tmp_path)
 
     response = client.get(reverse("import_preview"), follow=True)
 
-    assert response.redirect_chain[-1][0] == reverse("import_upload")
+    assert response.redirect_chain[-1][0] == reverse("imports")
     assert PREVIEW_EXPIRED_MESSAGE in response.content.decode()
     assert staged(tmp_path) == []
 
@@ -595,7 +595,7 @@ def test_a_preview_posted_from_an_earlier_tab_cannot_import_the_newer_file(clien
         follow=True,
     )
 
-    assert response.redirect_chain[-1][0] == reverse("import_upload")
+    assert response.redirect_chain[-1][0] == reverse("imports")
     assert PREVIEW_STALE_MESSAGE in response.content.decode()
     assert ImportRun.objects.filter(owner=alice, file_name="export.csv").count() == 0
 
@@ -622,14 +622,15 @@ def test_the_ledger_lists_the_newest_run_first_and_badges_a_conflict(client, ali
 
 
 @pytest.mark.django_db
-def test_an_account_with_no_imports_is_told_so_and_pointed_at_the_upload_page(client):
+def test_an_account_with_no_imports_is_told_so_and_still_offered_the_drop_zone(client):
     alice = get_user_model().objects.create_user(username="carol")
     client.force_login(alice)
 
     content = client.get(reverse("imports")).content.decode()
 
     assert "No imports yet." in content
-    assert f'href="{reverse("import_upload")}"' in content
+    assert "data-upload-form" in content
+    assert "Choose your first export above" in content
 
 
 @pytest.mark.django_db

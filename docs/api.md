@@ -25,18 +25,25 @@ curl -H "authorization: Bearer $TOKEN" http://localhost:8000/api/v1/summary
 - Only a SHA-256 digest of the secret and its first 8 characters are stored, so a database
   copy does not hand anyone a working token. The 8-character prefix is what the tokens
   page shows beside the name.
-- A missing, malformed, unknown or revoked token is a `401` with
+- A missing, malformed, unknown, revoked or expired token is a `401` with
   `error.code: "invalid_credentials"` and `WWW-Authenticate: Bearer`. So is a token whose
   account has been deactivated; reactivating the account makes the same token work again.
 - Secrets are created on `/tokens/` in the UI or with `manage.py make_token`, and are shown
-  once. See [usage](usage.md#the-tokens-page).
+  once. A token may carry an expiry date and stops working when it passes. See
+  [usage](usage.md#the-tokens-page).
 
 ## Envelope
 
-Every response, errors included, carries `contract_version` (the string `"1.0"`) and
+Every response, errors included, carries `contract_version` (the string `"2.0"`) and
 `generated_at`, the UTC instant the response was produced. Additive fields keep this
 version; a breaking shape change needs a new one. A client can therefore tell a contract
 change from a data change.
+
+`2.0` renamed three body-composition metric codes, because the export's own labels were
+wrong about what the columns carry: `fat_free_mass` became `fat_mass`,
+`average_fat_free_mass` became `average_fat_mass`, and `average_weight` became
+`average_weight_reported`. A request that filters on an old code is a `422`; the payloads
+carry the new codes.
 
 Collections add `items`, the complete filtered `count`, the `next` and `previous`
 continuation paths and `has_more`. Those paths keep every other query parameter, so
@@ -47,7 +54,7 @@ there is nothing more to say, a list of offending parameter names when there is:
 
 ```json
 {
-  "contract_version": "1.0",
+  "contract_version": "2.0",
   "generated_at": "2026-11-26T16:25:21Z",
   "error": {
     "code": "validation_error",

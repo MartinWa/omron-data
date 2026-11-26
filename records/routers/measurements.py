@@ -12,6 +12,7 @@ from ..params import (
     OptFilterParam,
     OptFlagParam,
     StrictQuery,
+    metric_query,
     sort_query,
     validate_pagination,
     validate_range,
@@ -38,6 +39,7 @@ INCLUDE_QUERY = StrictQuery(
     description="Pass components (or true) to inline each panel's components in the item.",
 )
 SORT_QUERY = sort_query(SORT_KEYS, "-at")
+METRIC_QUERY = metric_query()
 
 router = Router()
 
@@ -56,7 +58,7 @@ def metrics(request, query: NoQuery = NO_VALUE):
 )
 def measurements(
     request,
-    metric: OptFilterParam = NO_VALUE,
+    metric: OptFilterParam = METRIC_QUERY,
     since: OptDateTimeParam = NO_VALUE,
     until: OptDateTimeParam = NO_VALUE,
     level: str = LEVEL_QUERY,

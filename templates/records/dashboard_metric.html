@@ -20,7 +20,7 @@
   <svg class="empty-icon" width="38" height="38" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M2 12.5h4l2-4.5 3 9 2.5-6 1.5 1.5H22"/></svg>
   <p>No readings yet.</p>
   <p class="small">Import an OMRON connect CSV export to see {{ metric_label|lower }} here.</p>
-  <a class="btn btn-primary" href="{% url 'import_upload' %}">Import a CSV export</a>
+  <a class="btn btn-primary" href="{% url 'imports' %}">Import a CSV export</a>
 </div>
 {% else %}
 

@@ -344,9 +344,9 @@ METRIC_LABELS = {
     "visceral_fat": "Visceral fat",
     "resting_metabolism": "Resting metabolism",
     "impedance": "Impedance",
-    "fat_free_mass": "Fat-free mass",
-    "average_weight": "Average weight",
-    "average_fat_free_mass": "Average fat-free mass",
+    "fat_mass": "Fat mass",
+    "average_weight_reported": "Average weight as reported",
+    "average_fat_mass": "Average fat mass",
     "body_temperature": "Body temperature",
 }
 

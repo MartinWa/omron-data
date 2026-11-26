@@ -90,15 +90,15 @@ ALIASES: dict[str, tuple[str, ...]] = {
     "body_temperature": ("Temperatur ()", "Temperatur (°C)"),
     "body_weight": ("Vikt (kg)",),
     "body_weight_lb": ("Vikt (lbs)",),
-    "average_weight": ("Genomsnittlig vikt (kg)",),
-    "average_fat_free_mass": ("Genomsnittlig fettfri massa (kg)",),
+    "average_weight_reported": ("Genomsnittlig vikt (kg)",),
+    "average_fat_mass": ("Genomsnittlig fettfri massa (kg)",),
     "bmi": ("BMI",),
     "body_fat_pct": ("Kroppsfett (%)", "Kroppsfett–procent"),
     "skeletal_muscle_pct": ("Skelettmuskulatur %", "Skelettmuskulaturprocent"),
     "visceral_fat": ("Visceral fettnivå",),
     "resting_metabolism": ("Ämnesomsättning vid vila",),
     "impedance": ("Impedans",),
-    "fat_free_mass": ("Fettfri massa (kg)",),
+    "fat_mass": ("Fettfri massa (kg)",),
     "body_water_pct": ("Kroppsvatten (%)",),
 }
 

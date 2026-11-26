@@ -11,7 +11,7 @@ from django.contrib.auth.decorators import login_required
 from django.core.management import call_command
 from django.core.management.base import CommandError
 from django.core.paginator import Paginator
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.db.models import Count, F, FloatField, Func, Max, Min, Prefetch, Q, Window
 from django.db.models.functions import Lag
 from django.http import Http404
@@ -124,7 +124,7 @@ def _event_title(rows, groups) -> str:
         return _label(PANEL)
     if len(groups) == 1:
         return groups[0]["label"]
-    return f"{len(groups)} readings"
+    return "Weigh-in"
 
 
 def _event(at: datetime, rows) -> dict:
@@ -299,15 +299,24 @@ def _preview_report(owner, path: Path) -> dict:
     return report
 
 
-def _render_upload(request, form, too_large=None):
+def _imports_page(request, form, too_large=None):
     if too_large:
         form.fields["csv_file"].widget.attrs["aria-describedby"] = (
             "id_csv_file_helptext id_csv_file_error"
         )
+    runs = (
+        ImportRun.objects.filter(owner=request.user)
+        .annotate(rows=Count("measurements"))
+        .order_by("-imported_at", "-id")
+    )
+    page = Paginator(runs, IMPORTS_PAGE_SIZE).get_page(request.GET.get("page"))
     return render(
         request,
-        "records/import_upload.html",
+        "records/imports.html",
         {
+            "page": page,
+            "has_runs": page.paginator.count > 0,
+            "coverage": _coverage(request.user),
             "form": form,
             "too_large": too_large,
             "max_upload_bytes": MAX_UPLOAD_BYTES,
@@ -330,7 +339,7 @@ def _discard_pending(request, import_id: str) -> None:
 def _expired_preview(request, import_id: str):
     _discard_pending(request, import_id)
     messages.error(request, PREVIEW_EXPIRED_MESSAGE)
-    return redirect("import_upload")
+    return redirect("imports")
 
 
 class UploadForm(forms.Form):
@@ -344,37 +353,32 @@ class UploadForm(forms.Form):
     )
 
 
-@login_required
-def import_upload(request):
-    pending.purge_stale()
-    if request.method != "POST":
-        return _render_upload(request, UploadForm())
-
+def _handle_upload(request):
     content_length = request.META.get("CONTENT_LENGTH", "")
     size = int(content_length) if content_length.isdigit() else 0
     if size > MAX_REQUEST_BODY_BYTES:
-        return _render_upload(request, UploadForm(), too_large=TOO_LARGE_MESSAGE)
+        return _imports_page(request, UploadForm(), too_large=TOO_LARGE_MESSAGE)
 
     form = UploadForm(request.POST, request.FILES)
     if not form.is_valid():
-        return _render_upload(request, form)
+        return _imports_page(request, form)
     upload_file = form.cleaned_data["csv_file"]
     if upload_file.size > MAX_UPLOAD_BYTES:
         form.add_error("csv_file", TOO_LARGE_MESSAGE)
-        return _render_upload(request, form)
+        return _imports_page(request, form)
 
     content = upload_file.read()
     try:
         readings = parse_text(content.decode("utf-8-sig"))
     except UnicodeDecodeError:
         form.add_error("csv_file", NOT_UTF8_MESSAGE)
-        return _render_upload(request, form)
+        return _imports_page(request, form)
     except UnknownReportError as error:
         form.add_error("csv_file", str(error))
-        return _render_upload(request, form)
+        return _imports_page(request, form)
     if not readings:
         form.add_error("csv_file", NO_ROWS_MESSAGE)
-        return _render_upload(request, form)
+        return _imports_page(request, form)
 
     previous = _pending_session(request)
     if previous:
@@ -387,11 +391,11 @@ def import_upload(request):
     except UnknownReportError as error:
         pending.discard(import_id)
         form.add_error("csv_file", str(error))
-        return _render_upload(request, form)
+        return _imports_page(request, form)
     except OSError, ValueError:
         pending.discard(import_id)
         form.add_error("csv_file", STORE_FAILED_MESSAGE)
-        return _render_upload(request, form)
+        return _imports_page(request, form)
 
     request.session[PENDING_IMPORT_KEY] = {
         "id": import_id,
@@ -407,7 +411,7 @@ def import_preview(request):
     stored = _pending_session(request)
     if stored is None:
         messages.warning(request, PREVIEW_MISSING_MESSAGE)
-        return redirect("import_upload")
+        return redirect("imports")
 
     import_id = str(stored.get("id", ""))
     created_at = stored.get("created_at")
@@ -424,21 +428,21 @@ def import_preview(request):
     if not hmac.compare_digest(pending.fingerprint(content), fingerprint):
         _discard_pending(request, import_id)
         messages.error(request, PREVIEW_STALE_MESSAGE)
-        return redirect("import_upload")
+        return redirect("imports")
 
     if request.method == "POST":
         posted_id = request.POST.get("import_id", "")
         posted_fingerprint = request.POST.get("fingerprint", "")
         if posted_id != import_id or not hmac.compare_digest(posted_fingerprint, fingerprint):
             messages.error(request, PREVIEW_STALE_MESSAGE)
-            return redirect("import_upload")
+            return redirect("imports")
         if request.POST.get("action") == "cancel":
             _discard_pending(request, import_id)
             messages.info(request, PREVIEW_CANCELLED_MESSAGE)
-            return redirect("import_upload")
+            return redirect("imports")
         if request.POST.get("action") != "confirm":
             messages.error(request, PREVIEW_STALE_MESSAGE)
-            return redirect("import_upload")
+            return redirect("imports")
         staged = pending.staged_path(import_id)
         if staged is None:
             return _expired_preview(request, import_id)
@@ -520,21 +524,9 @@ def _coverage(owner) -> dict:
 @login_required
 def imports(request):
     pending.purge_stale()
-    runs = (
-        ImportRun.objects.filter(owner=request.user)
-        .annotate(rows=Count("measurements"))
-        .order_by("-imported_at", "-id")
-    )
-    page = Paginator(runs, IMPORTS_PAGE_SIZE).get_page(request.GET.get("page"))
-    return render(
-        request,
-        "records/imports.html",
-        {
-            "page": page,
-            "has_runs": page.paginator.count > 0,
-            "coverage": _coverage(request.user),
-        },
-    )
+    if request.method == "POST":
+        return _handle_upload(request)
+    return _imports_page(request, UploadForm())
 
 
 @login_required
@@ -568,6 +560,13 @@ class TokenForm(forms.Form):
         max_length=64,
         help_text="A name you will recognise, such as the device or script that uses it.",
     )
+    expires_in_days = forms.IntegerField(
+        required=False,
+        min_value=1,
+        max_value=3650,
+        label="Expires in days",
+        help_text="Optional. Leave empty for a token that does not expire on its own.",
+    )
 
     def __init__(self, *args, owner=None, **kwargs):
         super().__init__(*args, **kwargs)
@@ -588,12 +587,21 @@ def tokens(request):
         form = TokenForm(request.POST, owner=request.user)
         if form.is_valid():
             created_name = form.cleaned_data["name"]
-            secret = issue(request.user, created_name)
-            messages.success(
-                request,
-                f"Created {created_name}. Copy the secret now; it is shown only once.",
-            )
-            form = TokenForm(owner=request.user)
+            days = form.cleaned_data["expires_in_days"]
+            expires_at = timezone.now() + timedelta(days=days) if days else None
+            try:
+                with transaction.atomic():
+                    secret = issue(request.user, created_name, expires_at=expires_at)
+            except IntegrityError:
+                secret = None
+                created_name = ""
+                form.add_error("name", "A token with this name already exists.")
+            else:
+                messages.success(
+                    request,
+                    f"Created {created_name}. Copy the secret now; it is shown only once.",
+                )
+                form = TokenForm(owner=request.user)
     else:
         form = TokenForm(owner=request.user)
     return render(
@@ -615,11 +623,11 @@ def revoke_token(request, pk):
     if token is None:
         messages.error(request, "That token was not found.")
         return redirect("tokens")
-    if token.revoked:
+    if token.revoked_at is not None:
         messages.info(request, f"{token.name} was already revoked.")
         return redirect("tokens")
-    token.revoked = True
-    token.save(update_fields=["revoked"])
+    token.revoked_at = timezone.now()
+    token.save(update_fields=["revoked_at"])
     messages.success(request, f"Revoked {token.name}. Clients using it stop working now.")
     return redirect("tokens")
 
@@ -631,7 +639,7 @@ def delete_token(request, pk):
     if token is None:
         messages.error(request, "That token was not found.")
         return redirect("tokens")
-    if not token.revoked:
+    if token.status == "active":
         messages.error(request, f"Revoke {token.name} first; a working token cannot be deleted.")
         return redirect("tokens")
     name = token.name
