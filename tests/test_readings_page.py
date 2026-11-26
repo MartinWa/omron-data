@@ -145,6 +145,36 @@ def test_a_component_metric_filter_still_finds_its_panel(client):
 
 
 @pytest.mark.django_db
+def test_a_panel_filtered_by_its_own_metric_renders_once_with_its_three_components(client):
+    owner = owner_with("alice", *panels(10))
+    client.force_login(owner)
+
+    content = client.get(reverse("readings"), {"metric": "blood_pressure"}).content.decode()
+    card = events(content)[0]
+
+    assert content.count(DETAILS) == 1
+    assert card.count('class="badge"') == 1
+    assert card.count('scope="rowgroup"') == 1
+    assert card.count("<tbody>") == 1
+    assert card.count("<td>Systolic</td>") == 1
+    assert card.count("<td>Diastolic</td>") == 1
+    assert card.count("<td>Pulse</td>") == 1
+    assert "3 readings</caption>" in card
+
+
+@pytest.mark.django_db
+def test_a_pulse_filter_still_reaches_the_panel_through_its_component_once(client):
+    owner = owner_with("alice", *panels(10, 11))
+    client.force_login(owner)
+
+    content = client.get(reverse("readings"), {"metric": "pulse"}).content.decode()
+
+    assert content.count(DETAILS) == 2
+    assert [card.count('class="badge"') for card in events(content)] == [1, 1]
+    assert content.count("3 readings</caption>") == 2
+
+
+@pytest.mark.django_db
 def test_the_date_filters_include_the_whole_boundary_day(client):
     owner = get_user_model().objects.create_user(username="alice")
     day = datetime(2024, 6, 10, tzinfo=zone())

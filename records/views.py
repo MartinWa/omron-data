@@ -183,7 +183,9 @@ def readings(request):
 
     rows = stored.filter(parent__isnull=True)
     if selected_metric:
-        rows = rows.filter(Q(metric=selected_metric) | Q(components__metric=selected_metric))
+        rows = rows.filter(
+            Q(metric=selected_metric) | Q(components__metric=selected_metric)
+        ).distinct()
     if date_from:
         rows = rows.filter(at__gte=_day_start(date_from))
     if date_to:
