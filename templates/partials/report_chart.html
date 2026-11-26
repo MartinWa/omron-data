@@ -17,7 +17,9 @@
     {% endfor %}
   </g>
   {% if chart.has_line %}
-  <polyline class="chart-line series-1" points="{{ chart.line }}" fill="none"></polyline>
+  {% for segment in chart.segments %}
+  <polyline class="chart-line series-1" points="{{ segment }}" fill="none"></polyline>
+  {% endfor %}
   {% endif %}
   {% else %}
   <g class="chart-lines">

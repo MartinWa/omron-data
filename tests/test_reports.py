@@ -31,7 +31,7 @@ BAR_KEYS = [
     "plot_bottom",
     "right_edge",
     "bars",
-    "line",
+    "segments",
     "has_line",
     "xlabels",
     "ticks",
@@ -221,7 +221,7 @@ def test_bar_chart_without_points_does_not_divide_by_zero():
 
     assert chart["bars"] == []
     assert chart["xlabels"] == []
-    assert chart["line"] == ""
+    assert chart["segments"] == []
     assert chart["has_line"] is False
     assert chart["empty"] is True
     assert chart["ticks"][-1]["label"] == "1t"
@@ -237,13 +237,32 @@ def test_bar_chart_thins_xlabels_and_builds_the_moving_average_line():
 
     assert [label["label"] for label in chart["xlabels"]] == ["5 Jan", "12 Jan", "19 Jan"]
     assert chart["has_line"] is True
-    assert len(chart["line"].split()) == 2
+    assert [len(segment.split()) for segment in chart["segments"]] == [2]
 
     crowded = [
         {"date": date(2026, 1, 5) + timedelta(days=7 * index), "value": index}
         for index in range(30)
     ]
     assert len(bar_chart(crowded, bucket="week")["xlabels"]) == MAX_BARS
+
+
+def test_bar_chart_draws_one_polyline_per_run_and_skips_a_lone_vertex():
+    points = [
+        {"date": date(2026, 1, 5), "value": 1, "moving_average": 1},
+        {"date": date(2026, 1, 12), "value": 3, "moving_average": 2},
+        {"date": date(2026, 1, 19), "value": 6, "moving_average": None},
+        {"date": date(2026, 1, 26), "value": 2, "moving_average": 3},
+        {"date": date(2026, 2, 2), "value": 4, "moving_average": 5},
+        {"date": date(2026, 2, 9), "value": 5, "moving_average": 6},
+    ]
+    chart = bar_chart(points, unit="d", bucket="week")
+
+    assert len(chart["segments"]) == 2
+    assert [len(segment.split()) for segment in chart["segments"]] == [2, 3]
+
+    lone = bar_chart([{"date": date(2026, 1, 5), "value": 1, "moving_average": 1}], bucket="week")
+    assert lone["segments"] == []
+    assert lone["has_line"] is False
 
 
 def test_line_chart_projects_finite_points_and_labels():

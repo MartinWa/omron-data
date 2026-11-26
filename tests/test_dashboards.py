@@ -416,7 +416,7 @@ def test_weigh_ins_a_month_apart_never_draw_a_moving_average_line(client, db):
 
     assert len(weight["chart"]["bars"]) == 7
     assert weight["has_points"] is True
-    assert weight["chart"]["line"] == ""
+    assert weight["chart"]["segments"] == []
     assert weight["chart"]["has_line"] is False
     assert weight["has_line"] is False
     assert "4-week moving average" not in body
@@ -429,7 +429,7 @@ def test_eight_consecutive_weekly_weigh_ins_start_the_line_at_the_fourth_week(cl
     client.force_login(user)
 
     chart = client.get(reverse("dashboards"), {"range": "all"}).context["weight"]["chart"]
-    vertices = chart["line"].split()
+    vertices = chart["segments"][0].split()
 
     assert len(chart["bars"]) == 8
     assert len(vertices) == 5
@@ -437,18 +437,63 @@ def test_eight_consecutive_weekly_weigh_ins_start_the_line_at_the_fourth_week(cl
 
 
 @pytest.mark.django_db
-def test_one_missing_week_breaks_the_line_until_four_weeks_follow_it(client, db):
+def test_one_missing_week_splits_the_line_into_two_segments(client, db):
     user = get_user_model().objects.create_user(username="gap")
-    weigh_ins(user, timezone.localdate(), [7 * (11 - week) for week in range(12) if week != 6])
+    weigh_ins(user, timezone.localdate(), [7 * (11 - week) for week in range(12) if week != 5])
+    client.force_login(user)
+
+    response = client.get(reverse("dashboards"), {"range": "all"})
+    chart = response.context["weight"]["chart"]
+    bars = chart["bars"]
+
+    def xs_of(segment):
+        return [float(vertex.split(",")[0]) for vertex in segment.split()]
+
+    assert len(bars) == 11
+    assert len(chart["segments"]) == 2
+    first, second = (xs_of(segment) for segment in chart["segments"])
+    expected_second = [centre(bars[8]), centre(bars[9]), centre(bars[10])]
+    assert first == pytest.approx([centre(bars[3]), centre(bars[4])], abs=0.05)
+    assert second == pytest.approx(expected_second, abs=0.05)
+
+    drawn = first + second
+    for index in (5, 6, 7):
+        assert all(abs(centre(bars[index]) - x) > 0.05 for x in drawn)
+
+    body = content_of(response)
+    section = body.split("Weight</h2>", 1)[1].split("</section>", 1)[0]
+    drawn_points = re.findall(r'points="([^"]*)"', section)
+    rendered = [float(vertex.split(",")[0]) for points in drawn_points for vertex in points.split()]
+
+    assert section.count("<polyline") == 2
+    assert rendered == pytest.approx(first + second, abs=0.05)
+
+
+@pytest.mark.django_db
+def test_the_line_vertex_sits_at_the_mean_of_the_four_weekly_means(client, db):
+    user = get_user_model().objects.create_user(username="average")
+    today = timezone.localdate()
+    weekly = [80.0, 76.0, 72.0, 68.0, 72.0]
+    Measurement.objects.bulk_create(
+        [
+            measurement(user, "body_weight", moment(today - timedelta(days=7 * (4 - week))), weight)
+            for week, weight in enumerate(weekly)
+        ]
+    )
     client.force_login(user)
 
     chart = client.get(reverse("dashboards"), {"range": "all"}).context["weight"]["chart"]
-    xs = [float(vertex.split(",")[0]) for vertex in chart["line"].split()]
+    bars = chart["bars"]
+    vertices = chart["segments"][0].split()
 
-    assert len(chart["bars"]) == 11
-    assert len(xs) == 5
-    assert xs[2] == pytest.approx(centre(chart["bars"][5]), abs=0.05)
-    assert xs[3] == pytest.approx(centre(chart["bars"][9]), abs=0.05)
+    assert len(bars) == 5
+    assert len(vertices) == 2
+    x, y = (float(part) for part in vertices[0].split(","))
+    mean = (80.0 + 76.0 + 72.0 + 68.0) / 4
+    per_kilo = bars[0]["height"] / weekly[0]
+
+    assert x == pytest.approx(centre(bars[3]), abs=0.05)
+    assert y == pytest.approx(chart["plot_bottom"] - mean * per_kilo, abs=0.05)
 
 
 @pytest.mark.django_db

@@ -186,7 +186,8 @@ def bar_chart(points, *, unit="", bucket="week", multi_year=False, value_text=No
     slot = plot_width / count if count else plot_width
     bar_width = max(3.0, slot * 0.62)
     bars = []
-    ma_points = []
+    segments = []
+    segment = []
     for index, point in enumerate(points):
         value = point["value"]
         height = plot_height * (value / maximum) if maximum else 0
@@ -212,9 +213,15 @@ def bar_chart(points, *, unit="", bucket="week", multi_year=False, value_text=No
         if point.get("moving_average") is not None:
             ma_value = point["moving_average"]
             ma_y = CHART_TOP + plot_height - plot_height * (ma_value / maximum)
-            ma_points.append(
+            segment.append(
                 f"{_round_coord(CHART_LEFT + slot * index + slot / 2)},{_round_coord(ma_y)}"
             )
+        elif segment:
+            if len(segment) >= 2:
+                segments.append(" ".join(segment))
+            segment = []
+    if len(segment) >= 2:
+        segments.append(" ".join(segment))
     indexes = thin_indexes(count)
     xlabels = [
         {
@@ -239,8 +246,8 @@ def bar_chart(points, *, unit="", bucket="week", multi_year=False, value_text=No
         "plot_bottom": _round_coord(CHART_TOP + plot_height),
         "right_edge": CHART_WIDTH - CHART_RIGHT,
         "bars": bars,
-        "line": " ".join(ma_points),
-        "has_line": len(ma_points) >= 2,
+        "segments": segments,
+        "has_line": bool(segments),
         "xlabels": xlabels,
         "ticks": tick_positions,
         "aria_label": aria_label,
