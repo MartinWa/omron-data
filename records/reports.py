@@ -1,7 +1,7 @@
 import calendar
 import math
 from collections import deque
-from datetime import date, datetime, time, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from urllib.parse import urlencode
 from zoneinfo import ZoneInfo
 
@@ -728,7 +728,11 @@ def _week_start(day):
 
 
 def _day_start(day):
-    return datetime.combine(day, time.min, tzinfo=ZoneInfo(settings.OMRON_TIME_ZONE))
+    try:
+        local = datetime.combine(day, time.min, tzinfo=ZoneInfo(settings.OMRON_TIME_ZONE))
+        return local.astimezone(UTC)
+    except OverflowError, ValueError:
+        return datetime.min.replace(tzinfo=UTC)
 
 
 def _history(owner, window=None):
@@ -1549,20 +1553,35 @@ def _reading_text(point):
     return f"{count} reading{'' if count == 1 else 's'}"
 
 
-def _weekly_card(series, resolved):
+def _weekly_card(series, resolved, today):
     start = resolved["start"]
     end = resolved["end"]
+    bucket = "week"
+    partial = resolved["partial"]
+    aggregate_note = ""
+    if len(partial) > MAX_HEATMAP_COLUMNS:
+        bucket = "month"
+        partial = partial_buckets(start, end, "month", today=today)
+        aggregate_note = (
+            f"Bars aggregated per month: the range spans more than {MAX_HEATMAP_COLUMNS} weeks."
+        )
+        if len(partial) > MAX_HEATMAP_COLUMNS:
+            start = _shift_months(_bucket_start(end, "month"), 1 - MAX_HEATMAP_COLUMNS)
+            partial = partial_buckets(start, end, "month", today=today)
+            aggregate_note = (
+                f"Bars aggregated per month and capped to the most recent {len(partial)} months."
+            )
     counts = {}
     for point in _range_readings(series, start, end):
-        week = _week_start(point["date"])
-        counts[week] = counts.get(week, 0) + 1
+        key = _bucket_start(point["date"], bucket)
+        counts[key] = counts.get(key, 0) + 1
     points = []
-    for week in sorted(resolved["partial"]):
-        info = resolved["partial"][week]
+    for key in sorted(partial):
+        info = partial[key]
         points.append(
             {
-                "date": week,
-                "value": counts.get(week, 0),
+                "date": key,
+                "value": counts.get(key, 0),
                 "partial": info["partial"],
                 "in_progress": info["in_progress"],
                 "note": info["note"],
@@ -1570,15 +1589,15 @@ def _weekly_card(series, resolved):
         )
     chart = bar_chart(
         points,
-        bucket="week",
+        bucket=bucket,
         multi_year=start.year != end.year,
         value_text=_reading_text,
         height=TALL_CHART_HEIGHT,
-        aria_label=f"Readings per week from {resolved['label']}",
+        aria_label=f"Readings per {bucket} from {resolved['label']}",
     )
     rows_all = [
         {
-            "date": _full_bucket_label(point["date"], "week"),
+            "date": _full_bucket_label(point["date"], bucket),
             "text": _reading_text(point),
             "note": point["note"],
         }
@@ -1590,7 +1609,9 @@ def _weekly_card(series, resolved):
         "rows_total": len(rows_all),
         "rows_url": reverse("readings"),
         "total": sum(counts.values()),
-        "weeks": len(points),
+        "buckets": len(points),
+        "noun": bucket,
+        "aggregate_note": aggregate_note,
         "has_points": bool(points),
     }
 
@@ -1865,7 +1886,7 @@ def build_dashboard_consistency(owner, params, today):
     context.update(
         {
             "consistency": _consistency_card(series, resolved),
-            "weekly": _weekly_card(series, resolved),
+            "weekly": _weekly_card(series, resolved, today),
             "weekday": _weekday_card(series, resolved),
         }
     )
@@ -1955,6 +1976,7 @@ def build_metric_dashboard(owner, metric, params, today):
                     )
                     for point in points
                 ],
+                "dots_all": True,
             }
         )
     chart = line_chart(

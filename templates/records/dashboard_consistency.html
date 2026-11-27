@@ -90,17 +90,20 @@
   <section class="card report-card">
     <div class="card-head">
       <h2>Readings per week</h2>
-      <span class="muted small">{{ weekly.total }} in {{ weekly.weeks }} week{{ weekly.weeks|pluralize }}</span>
+      <span class="muted small">{{ weekly.total }} in {{ weekly.buckets }} {{ weekly.noun }}{{ weekly.buckets|pluralize }}</span>
     </div>
     {% if weekly.has_points %}
     <div class="chart-wrap">
       {% include "partials/report_chart.html" with chart=weekly.chart %}
     </div>
-    <p class="chart-note">Shaded bar: the current week, still in progress.</p>
+    <p class="chart-note">Shaded bar: the current {{ weekly.noun }}, still in progress.</p>
+    {% if weekly.aggregate_note %}
+    <p class="chart-note">{{ weekly.aggregate_note }}</p>
+    {% endif %}
     <details class="data-table" data-print-open>
       <summary>Show the numbers</summary>
       {% if weekly.rows_total > weekly.rows|length %}
-      <p class="small muted">Showing the {{ weekly.rows|length }} most recent of {{ weekly.rows_total }} weeks. <a href="{{ weekly.rows_url }}">All readings</a></p>
+      <p class="small muted">Showing the {{ weekly.rows|length }} most recent of {{ weekly.rows_total }} {{ weekly.noun }}s. <a href="{{ weekly.rows_url }}">All readings</a></p>
       {% endif %}
       <div class="table-wrap">
         <table class="table">

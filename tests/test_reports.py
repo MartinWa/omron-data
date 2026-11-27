@@ -821,7 +821,8 @@ def test_report_chart_partial_renders_lines_then_dots_then_the_tip_so_dots_win_p
     assert lines_group.count("<polyline") == 2
     assert "chart-dot" not in lines_group
     assert dots_group.count("chart-dot") == 5
-    assert "Mark four" in dots_group
+    assert re.search(r'<circle class="chart-dot series-2 outlier"[^>]*></circle>', dots_group)
+    assert "Mark four" not in dots_group
     assert (
         markup.index('<g class="chart-lines">')
         < markup.index('<g class="chart-dots">')
@@ -884,6 +885,19 @@ def test_integer_steps_never_go_below_one():
         [{"label": "W", "points": [(0, 72.4), (1, 72.5)]}], x_max=1, x_ticks=[], y_unit="kg"
     )
     assert any("." in tick["label"] for tick in weight["ticks"])
+
+
+def test_report_chart_partial_omits_the_tab_stop_when_there_are_no_markers():
+    empty = rendered(line_chart([], x_max=1, x_ticks=[]))
+    assert 'tabindex="0"' not in empty
+
+    with_points = rendered(
+        line_chart([{"label": "W", "points": [(0, 1)], "dots_all": True}], x_max=1, x_ticks=[])
+    )
+    assert 'tabindex="0"' in with_points
+
+    bars = rendered(bar_chart(bar_points(), unit="t"))
+    assert 'tabindex="0"' in bars
 
 
 def test_line_chart_axis_follows_the_data_only_so_a_high_point_does_not_stretch_it():
@@ -1069,7 +1083,7 @@ def test_report_chart_partial_renders_segments_dots_of_every_shape_tones_and_mar
     assert markup.count('<rect class="chart-dot series-2"') == 2
     assert markup.count('<polygon class="chart-dot series-3"') == 2
     assert '<circle class="chart-dot series-3 outlier"' in markup
-    assert "<title>Mark six</title>" in markup
+    assert re.search(r'<circle class="chart-dot series-3 outlier"[^>]*></circle>', markup)
     assert "nan" not in markup
     assert "inf" not in markup
     assert "None" not in markup

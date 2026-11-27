@@ -103,7 +103,13 @@
   <details class="data-table" data-print-open>
     <summary>Show the numbers</summary>
     {% if composition.rows_total > composition.rows|length %}
-    <p class="small muted">Showing the {{ composition.rows|length }} most recent of {{ composition.rows_total }} readings. <a href="{{ composition.rows_url }}">All {{ composition.label|lower }} readings</a></p>
+    <p class="small muted">Showing the {{ composition.rows|length }} most recent of {{ composition.rows_total }} readings.
+      {% if composition.combined %}
+      {% for link in composition.links %}<a href="{{ link.url }}">{{ link.label }}</a>{% if not forloop.last %} · {% endif %}{% endfor %}
+      {% else %}
+      <a href="{{ composition.rows_url }}">All {{ composition.label|lower }} readings</a>
+      {% endif %}
+    </p>
     {% endif %}
     <div class="table-wrap">
       {% if composition.combined %}

@@ -253,6 +253,10 @@ def test_the_avg_line_and_tip_have_their_own_styles():
     active = css_block(css, ".chart-dot.chart-point-active {")
     assert "stroke: var(--text);" in active
     assert "stroke-width: 2;" in active
+    outlier = css_block(css, ".chart-dot.outlier {")
+    assert "fill: none;" in outlier
+    assert "pointer-events: none;" in outlier
+    assert "stroke: var(--danger);" in outlier
 
 
 def test_the_custom_range_popover_is_a_toolbar_wide_card_hidden_in_print():

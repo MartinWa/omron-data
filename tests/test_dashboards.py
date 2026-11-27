@@ -25,6 +25,7 @@ from records.reports import (
     TALL_CHART_HEIGHT,
     WEEKDAYS,
     _bp_category,
+    _day_start,
     _fetch_window,
     _history,
     _rolling_average,
@@ -1381,6 +1382,28 @@ def test_the_seven_day_kpi_lookbacks_are_clamped_to_their_own_periods(client, db
     assert seven["delta"]["aria"] == "down 1 mmHg versus the previous period"
 
 
+def test_the_metric_drill_down_renders_a_dot_per_point_and_a_tab_stop(signed_in):
+    response = signed_in.get(
+        reverse("dashboard_metric", kwargs={"metric": "visceral_fat"}), {"range": "30d"}
+    )
+    chart = response.context["chart"]
+    body = content_of(response)
+
+    assert len(chart["lines"][0]["dots"]) == response.context["readings_total"]
+    assert all(dot["title"] for dot in chart["lines"][0]["dots"])
+    assert re.search(r'<svg class="chart chart-lines"[^>]*tabindex="0"', body)
+    assert "tabindex" not in re.search(r'<circle class="chart-dot[^>]*>', body).group(0)
+
+
+@pytest.mark.django_db
+def test_the_day_start_bound_never_raises_for_date_min(owner):
+    bound = _day_start(date.min)
+
+    assert bound.tzinfo is not None
+    assert bound.year == 1
+    assert Measurement.objects.filter(at__gte=bound).count() == Measurement.objects.count()
+
+
 def test_the_reading_age_uses_the_real_today_not_the_range_end(signed_in):
     today = timezone.localdate()
     response = signed_in.get(
@@ -2126,13 +2149,24 @@ def test_the_composition_table_caps_at_two_hundred_rows_with_a_note_and_a_link(c
 
     assert len(composition["rows"]) == CARD_ROW_LIMIT
     assert composition["rows_total"] == CARD_ROW_LIMIT + 50
-    expected_url = (
+    today = timezone.localdate()
+    window = f"from={(today - timedelta(days=CARD_ROW_LIMIT + 49)).isoformat()}&amp;to={today.isoformat()}"
+    assert composition["rows_url"] == (
         f"/readings/?metric=body_fat_pct&from={(today - timedelta(days=CARD_ROW_LIMIT + 49)).isoformat()}"
         f"&to={today.isoformat()}"
     )
-    assert composition["rows_url"] == expected_url
     assert f"Showing the {CARD_ROW_LIMIT} most recent of {CARD_ROW_LIMIT + 50} readings" in body
-    assert f'href="{expected_url.replace("&", "&amp;")}"' in body
+    assert f'href="/readings/?metric=body_fat_pct&amp;{window}"' in body
+    assert f'href="/readings/?metric=skeletal_muscle_pct&amp;{window}"' in body
+    assert "All body fat readings" in body
+    assert "All skeletal muscle readings" in body
+
+    uncapped = (
+        content_of(client.get(reverse("dashboard_weight"), {"metric": "body_fat_pct"}))
+        .split("Body composition", 1)[1]
+        .split("</section>", 1)[0]
+    )
+    assert "Showing the" not in uncapped
 
 
 @pytest.mark.django_db
@@ -2161,7 +2195,7 @@ def test_the_blood_pressure_table_caps_at_two_hundred_rows_with_a_note_and_a_lin
 
 
 @pytest.mark.django_db
-def test_the_weekly_table_caps_at_two_hundred_weeks_with_a_note_and_a_link(client, db):
+def test_the_weekly_card_aggregates_to_months_for_a_long_range(client, db):
     user = get_user_model().objects.create_user(username="weekly-years")
     today = timezone.localdate()
     Measurement.objects.bulk_create(
@@ -2176,11 +2210,42 @@ def test_the_weekly_table_caps_at_two_hundred_weeks_with_a_note_and_a_link(clien
     weekly = response.context["weekly"]
     body = content_of(response)
 
-    assert len(weekly["rows"]) == CARD_ROW_LIMIT
-    assert weekly["rows_total"] == CARD_ROW_LIMIT + 10
+    assert weekly["noun"] == "month"
+    assert len(weekly["chart"]["bars"]) == weekly["buckets"] <= MAX_HEATMAP_COLUMNS
+    assert weekly["rows_total"] == weekly["buckets"]
+    assert weekly["aggregate_note"].startswith("Bars aggregated per month")
+    assert weekly["aggregate_note"] in body
+    assert weekly["chart"]["aria_label"].startswith("Readings per month from ")
+    assert re.fullmatch(r"[A-Z][a-z]{2} \d{4}", weekly["chart"]["bars"][0]["title"].split(":")[0])
     assert weekly["rows_url"] == "/readings/"
-    assert f"Showing the {CARD_ROW_LIMIT} most recent of {CARD_ROW_LIMIT + 10} weeks" in body
-    assert 'href="/readings/"' in body
+    assert f"in {weekly['buckets']} months" in body
+
+
+def test_the_weekly_card_caps_months_for_a_huge_custom_range(signed_in):
+    today = timezone.localdate()
+    response = signed_in.get(
+        reverse("dashboard_consistency"),
+        {
+            "range": "custom",
+            "from": (today - timedelta(days=4000)).isoformat(),
+            "to": today.isoformat(),
+        },
+    )
+    weekly = response.context["weekly"]
+
+    assert weekly["noun"] == "month"
+    assert len(weekly["chart"]["bars"]) <= MAX_HEATMAP_COLUMNS
+    assert "capped to the most recent" in weekly["aggregate_note"]
+    assert weekly["aggregate_note"] in content_of(response)
+
+
+def test_the_weekly_card_keeps_week_buckets_for_normal_ranges(signed_in):
+    response = signed_in.get(reverse("dashboard_consistency"), {"range": "30d"})
+    weekly = response.context["weekly"]
+
+    assert weekly["noun"] == "week"
+    assert weekly["aggregate_note"] == ""
+    assert len(weekly["chart"]["bars"]) == len(response.context["range"]["partial"])
 
 
 def test_the_extremes_row_carries_the_unit_and_a_single_reading_is_not_repeated(

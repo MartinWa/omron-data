@@ -1870,8 +1870,10 @@ body:has(#custom-range-popover:popover-open) button[popovertarget="custom-range-
 }
 
 .chart-dot.outlier {
+  fill: none;
   stroke: var(--danger);
   stroke-width: 2;
+  pointer-events: none;
 }
 
 .chart-dot.dot-latest {

@@ -161,7 +161,10 @@ page computes a coordinate, and no template does arithmetic.
   dots and marks carry no tabindex — `chart-tips.js` moves an internal active point across the
   markers with the arrow keys (Home/End jump to the ends) and marks it with
   `.chart-point-active`. A line may carry `marks` — outlier readings —
-  rendered as `chart-dot … outlier` circles with a `<title>`. The blood-pressure category
+  rendered as decorative `chart-dot … outlier` rings (`fill: none; pointer-events: none`, no
+  `<title>`, so the category-coloured dot underneath keeps the hover and AT text). The
+  `<svg>` only gets `tabindex="0"` when the chart actually has markers (any bars, or lines with
+  dots), and `chart-tips.js` no-ops on keydown when there are none. The blood-pressure category
   thresholds are data in `records/models.py` (`REFERENCE_BANDS`), never hex in Python, and each
   band also carries a `tone` class (`cat-elevated` / `cat-stage1` / `cat-danger`, with `cat-ok`
   below 120) that `_reference_tone`, `_diastolic_tone` and the category legend use for the dot
@@ -229,6 +232,15 @@ page computes a coordinate, and no template does arithmetic.
   the 14px minimum, with the `.heatmap-weeks` heading row stretching the same way and Mon–Sun
   labels on the left) above a `.report-grid` holding the
   `_weekly_card` and `_weekday_card` side by side, both on the tall 380 frame.
+  `_weekly_card` bounds itself: more than `MAX_HEATMAP_COLUMNS` (54) resolved weeks aggregate
+  the bars to month buckets (`partial_buckets(..., "month")`), and if even that exceeds 54 the
+  window is clamped to the most recent 54 months, with an `aggregate_note` under the chart.
+  `_day_start` converts local midnight to UTC itself and clamps to `datetime.min` UTC on
+  overflow, so a `date.min` bound can never raise while preparing a query. Drill-down charts
+  (`build_metric_dashboard`) draw a dot per point (`dots_all`) with a per-point `<title>`, so
+  every chart's tab stop is useful. When the combined composition table is capped, the notice
+  links both metrics' readings views (`/readings/?metric=…&from=…&to=…`) instead of one
+  combined link.
   `_composition_card` draws the two percentage metrics in `COMBINED_COMPOSITION` (body fat
   and skeletal muscle) together on one shared percent axis when the selected metric is one
   of them — a `series-1` and a `series-4` line, so colour, dash pattern and dot shape all

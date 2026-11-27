@@ -1,4 +1,4 @@
-<svg class="chart chart-{{ chart.kind }}" viewBox="0 0 {{ chart.width }} {{ chart.height }}" role="img" aria-label="{{ chart.aria_label }}" tabindex="0" preserveAspectRatio="xMidYMid meet">
+<svg class="chart chart-{{ chart.kind }}" viewBox="0 0 {{ chart.width }} {{ chart.height }}" role="img" aria-label="{{ chart.aria_label }}"{% if chart.kind == "bars" or chart.lines %} tabindex="0"{% endif %} preserveAspectRatio="xMidYMid meet">
   <g class="chart-grid" aria-hidden="true">
     {% for tick in chart.ticks %}
     <line class="chart-gridline" x1="{{ chart.left }}" y1="{{ tick.y }}" x2="{{ chart.right_edge }}" y2="{{ tick.y }}"></line>
@@ -36,9 +36,7 @@
     {% endif %}
     {% endfor %}
     {% for mark in line.marks %}
-    <circle class="chart-dot {{ mark.class }} outlier" cx="{{ mark.x }}" cy="{{ mark.y }}" r="4">
-      <title>{{ mark.title }}</title>
-    </circle>
+    <circle class="chart-dot {{ mark.class }} outlier" cx="{{ mark.x }}" cy="{{ mark.y }}" r="4"></circle>
     {% endfor %}
     {% endfor %}
   </g>
