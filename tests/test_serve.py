@@ -1,10 +1,11 @@
 import http.client
 import threading
 
+import pytest
 from django.test import RequestFactory, override_settings
 from waitress.server import create_server
 
-from tools.serve import proxy_options
+from tools.serve import listen_address, proxy_options, verify_proxy_configuration
 
 
 def echo_app(environ, start_response):
@@ -76,3 +77,37 @@ def test_django_takes_the_scheme_from_the_forwarded_header():
     request = RequestFactory().get("/accounts/login/", headers={"x-forwarded-proto": "https"})
 
     assert request.is_secure() is True
+
+
+def test_production_refuses_to_start_without_a_trusted_proxy(settings):
+    settings.DEBUG = False
+    settings.OMRON_TRUSTED_PROXY = ""
+
+    with pytest.raises(SystemExit, match="OMRON_TRUSTED_PROXY is empty"):
+        verify_proxy_configuration()
+
+
+def test_production_starts_with_a_declared_trusted_proxy(settings):
+    settings.DEBUG = False
+    settings.OMRON_TRUSTED_PROXY = "*"
+
+    verify_proxy_configuration()
+
+
+def test_debug_starts_without_a_trusted_proxy(settings):
+    settings.DEBUG = True
+    settings.OMRON_TRUSTED_PROXY = ""
+
+    verify_proxy_configuration()
+
+
+def test_debug_binds_the_server_to_loopback_only(settings):
+    settings.DEBUG = True
+
+    assert listen_address(8000) == "127.0.0.1:8000"
+
+
+def test_production_binds_all_interfaces(settings):
+    settings.DEBUG = False
+
+    assert listen_address(8000) == "*:8000"

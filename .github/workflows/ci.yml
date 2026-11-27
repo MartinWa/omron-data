@@ -117,12 +117,13 @@ jobs:
           chmod 0777 "$data_directory"
           docker run --detach --name omron-data-ci \
             --read-only \
-            --tmpfs /tmp:size=67108864,mode=1777 \
+            --tmpfs /tmp:size=268435456,mode=1777 \
             --cap-drop ALL \
             --security-opt no-new-privileges:true \
             --volume "$data_directory:/app/data" \
             --env OMRON_SECRET_KEY="$OMRON_SECRET_KEY" \
             --env OMRON_ALLOWED_HOSTS=127.0.0.1 \
+            --env OMRON_TRUSTED_PROXY=127.0.0.1 \
             omron-data:ci
           attempts=60
           until docker exec omron-data-ci python tools/healthcheck.py; do

@@ -15,6 +15,7 @@ def test_every_success_body_carries_the_envelope(auth):
     paths = (
         "/api/v1/",
         "/api/v1/healthz",
+        "/api/v1/readyz",
         "/api/v1/metrics",
         "/api/v1/measurements",
         "/api/v1/summary",
@@ -158,6 +159,188 @@ def test_healthz_answers_without_a_token_and_carries_the_envelope(db):
     body = response.json()
     assert body["status"] == "ok"
     assert ENVELOPE.issubset(body)
+
+
+def test_readyz_answers_without_a_token_when_the_database_is_migrated(db):
+    response = Client().get("/api/v1/readyz")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "ok"
+    assert ENVELOPE.issubset(body)
+
+
+def test_readyz_answers_503_with_the_envelope_when_migrations_are_pending(db, monkeypatch, caplog):
+    import logging
+    from types import SimpleNamespace
+
+    from django.db.migrations.executor import MigrationExecutor
+
+    pending = [(SimpleNamespace(app_label="records", name="0005_future"), False)]
+    monkeypatch.setattr(MigrationExecutor, "migration_plan", lambda self, targets: pending)
+
+    with caplog.at_level(logging.ERROR, logger="django"):
+        response = Client().get("/api/v1/readyz")
+
+    assert response.status_code == 503
+    body = response.json()
+    assert body["error"]["code"] == "service_unavailable"
+    assert body["error"]["message"] == "Service temporarily unavailable"
+    assert "0005_future" not in response.content.decode()
+    assert ENVELOPE.issubset(body)
+    assert any("records.0005_future" in record.getMessage() for record in caplog.records)
+
+
+def test_readyz_answers_503_with_the_envelope_when_the_database_is_unreadable(
+    db, monkeypatch, caplog
+):
+    import logging
+
+    from django.db import OperationalError
+
+    import records.routers.meta as meta
+
+    class BrokenConnection:
+        settings_dict = {"NAME": ":memory:", "ENGINE": "django.db.backends.sqlite3"}
+
+        def is_in_memory_db(self):
+            return True
+
+        def cursor(self):
+            raise OperationalError("disk I/O error")
+
+    monkeypatch.setattr(meta, "connection", BrokenConnection())
+
+    with caplog.at_level(logging.ERROR, logger="django"):
+        response = Client().get("/api/v1/readyz")
+
+    assert response.status_code == 503
+    body = response.json()
+    assert body["error"]["code"] == "service_unavailable"
+    assert body["error"]["message"] == "Service temporarily unavailable"
+    assert "disk I/O error" not in response.content.decode()
+    assert ENVELOPE.issubset(body)
+    assert any(
+        "Readiness check failed" in record.getMessage() and record.exc_info
+        for record in caplog.records
+    )
+
+
+def test_readyz_refuses_a_missing_database_file_without_creating_it(db, monkeypatch, tmp_path):
+    import records.routers.meta as meta
+
+    missing = tmp_path / "gone.sqlite3"
+
+    class MissingConnection:
+        settings_dict = {
+            "NAME": str(missing),
+            "ENGINE": "django.db.backends.sqlite3",
+        }
+
+        def is_in_memory_db(self):
+            return False
+
+    monkeypatch.setattr(meta, "connection", MissingConnection())
+
+    response = Client().get("/api/v1/readyz")
+
+    assert response.status_code == 503
+    assert response.json()["error"]["message"] == "Service temporarily unavailable"
+    assert not missing.exists()
+
+
+def test_readyz_treats_an_empty_database_file_as_pending_without_writing_to_it(
+    db, monkeypatch, tmp_path
+):
+    import records.routers.meta as meta
+
+    empty = tmp_path / "empty.sqlite3"
+    empty.touch()
+
+    class EmptyConnection:
+        settings_dict = {
+            "NAME": str(empty),
+            "ENGINE": "django.db.backends.sqlite3",
+        }
+
+        def is_in_memory_db(self):
+            return False
+
+    monkeypatch.setattr(meta, "connection", EmptyConnection())
+
+    response = Client().get("/api/v1/readyz")
+
+    assert response.status_code == 503
+    assert response.json()["error"]["message"] == "Service temporarily unavailable"
+    assert empty.stat().st_size == 0
+
+
+def test_readyz_uri_encodes_special_characters_in_the_database_path(db, monkeypatch, tmp_path):
+    import records.routers.meta as meta
+
+    weird = tmp_path / "omron#backup?x.sqlite3"
+
+    class WeirdConnection:
+        settings_dict = {"NAME": str(weird), "ENGINE": "django.db.backends.sqlite3"}
+
+        def is_in_memory_db(self):
+            return False
+
+    monkeypatch.setattr(meta, "connection", WeirdConnection())
+
+    response = Client().get("/api/v1/readyz")
+
+    assert response.status_code == 503
+    assert response.json()["error"]["message"] == "Service temporarily unavailable"
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_readyz_logs_the_real_cause_when_the_migration_read_fails(
+    db, monkeypatch, tmp_path, caplog
+):
+    import logging
+    import sqlite3
+    from types import SimpleNamespace
+
+    import records.routers.meta as meta
+
+    target = tmp_path / "locked.sqlite3"
+    target.touch()
+
+    class LockedProbe:
+        def execute(self, sql):
+            if "django_migrations" in sql:
+                raise sqlite3.OperationalError("database is locked")
+            return []
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(
+        meta,
+        "sqlite3",
+        SimpleNamespace(
+            connect=lambda *args, **kwargs: LockedProbe(),
+            Error=sqlite3.Error,
+            OperationalError=sqlite3.OperationalError,
+        ),
+    )
+
+    class FileConnection:
+        settings_dict = {"NAME": str(target), "ENGINE": "django.db.backends.sqlite3"}
+
+        def is_in_memory_db(self):
+            return False
+
+    monkeypatch.setattr(meta, "connection", FileConnection())
+
+    with caplog.at_level(logging.ERROR, logger="django"):
+        response = Client().get("/api/v1/readyz")
+
+    assert response.status_code == 503
+    assert response.json()["error"]["message"] == "Service temporarily unavailable"
+    assert "database is locked" in caplog.text
+    assert "pending" not in caplog.text
 
 
 def test_metrics_matches_the_registry_with_units_and_kinds(auth):
@@ -369,6 +552,7 @@ def test_the_openapi_schema_documents_the_error_responses(auth):
     assert "401" in responses
     assert "ErrorOut" in schema["components"]["schemas"]
     assert "401" not in schema["paths"]["/api/v1/healthz"]["get"]["responses"]
+    assert "401" not in schema["paths"]["/api/v1/readyz"]["get"]["responses"]
 
 
 def test_the_api_base_url_without_a_slash_is_refused_with_the_envelope(auth):

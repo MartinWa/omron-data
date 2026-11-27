@@ -11,10 +11,10 @@ express.
 
 ## Authentication
 
-`GET /api/v1/healthz` is the only data endpoint that needs no token. The two generated
-reference endpoints, `/api/v1/docs` and `/api/v1/openapi.json`, are also anonymous, because
-a browser has to be able to fetch them without a header. Everything else requires a bearer
-token:
+`GET /api/v1/healthz` and `GET /api/v1/readyz` are the only data endpoints that need no token.
+The two generated reference endpoints, `/api/v1/docs` and `/api/v1/openapi.json`, are also
+anonymous, because a browser has to be able to fetch them without a header. Everything else
+requires a bearer token:
 
 ```sh
 curl -H "authorization: Bearer $TOKEN" http://localhost:8000/api/v1/summary
@@ -76,8 +76,9 @@ there is nothing more to say, a list of offending parameter names when there is:
 | 503 | `service_unavailable` |
 
 `500` is what an unexpected failure returns, with the traceback in the server log and not
-in the body. `403` and `503` are defined for a permission check and a transient condition
-that no endpoint produces today.
+in the body. `403` is defined for a permission check. `503` is what `GET /api/v1/readyz`
+returns while the database cannot be opened or migrations are pending; like the `500`, the
+specific reason is logged server-side and never sent in the body.
 
 Every response, including every refusal, sets `Cache-Control: no-store`.
 
@@ -98,7 +99,8 @@ has no value of its own, so its `value` is `null` and its numbers are on its com
 | Path | Parameters | Returns |
 | --- | --- | --- |
 | `GET /api/v1/` | none | the contract version, the service name and the endpoint list |
-| `GET /api/v1/healthz` | none | `status: "ok"`; the only data endpoint that needs no token |
+| `GET /api/v1/healthz` | none | `status: "ok"`; liveness only, no token needed |
+| `GET /api/v1/readyz` | none | `status: "ok"` when the database opens and all migrations are applied, `503` with the standard error body otherwise; no token needed, and the endpoint the container health check calls |
 | `GET /api/v1/metrics` | none | the metric registry: `code`, `unit` and `kind` for all 16 codes |
 | `GET /api/v1/measurements` | `metric`, `since`, `until`, `level`, `include`, `sort`, `limit`, `offset` | a page of readings, `level=panel` by default |
 | `GET /api/v1/measurements/{id}` | none | one row plus its components |
@@ -132,8 +134,14 @@ its panel. Another owner's id is a `404`, not a `403`.
 | `offset` | `0` | 0 to 2147483647 |
 
 `imports` accepts `limit` and `offset` only. The routes with no parameters listed above
-(`/`, `/healthz`, `/metrics`, `/summary`, `/measurements/{id}`) reject **any** query
-parameter with a 422 rather than ignoring it.
+(`/`, `/healthz`, `/readyz`, `/metrics`, `/summary`, `/measurements/{id}`) reject **any**
+query parameter with a 422 rather than ignoring it.
+
+`healthz` never touches the database, so it answers even while the database is broken; that
+makes it the liveness probe. `readyz` opens the database with `SELECT 1` and compares the
+applied migrations against the code, so a restored-but-unreadable database or a pending
+migration turns the container unhealthy instead of leaving every other page to fail with a
+500.
 
 ### `level` and `include`
 

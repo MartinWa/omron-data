@@ -103,9 +103,11 @@ docker compose logs -f web
 
 `OMRON_TRUSTED_PROXY` is required behind the proxy, not optional: waitress discards
 `X-Forwarded-Proto` and `X-Forwarded-For` unless the peer is named, the app then sees
-`http`, and every browser login fails the CSRF origin check with no other symptom. Set `*`
-for a proxy on the host or on a private network, or the proxy container's address when it
-sits on the `omron-data` network. See [Proxy headers](#proxy-headers).
+`http`, and every browser login fails the CSRF origin check with no other symptom. With
+`OMRON_DEBUG` off the server refuses to start while the variable is empty, so the
+misconfiguration is loud at boot instead of silent at login. Set `*` for a proxy on the
+host or on a private network, or the proxy container's address when it sits on the
+`omron-data` network. See [Proxy headers](#proxy-headers).
 
 If the data directory is not writable, startup stops with an error that names the
 directory and the `chown` that fixes it, before anything else is attempted. On each start
@@ -114,16 +116,21 @@ waitress; waitress on this image drains requests on `SIGTERM`, which `compose.ya
 with `stop_grace_period: 30s`.
 
 The container runs read-only with every Linux capability dropped, `no-new-privileges`, an
-`init` process and a 64 MB tmpfs at `/tmp`, and its built-in health check calls
-`GET /api/v1/healthz` every 30 seconds with a 15-second start period:
+`init` process and a 256 MB tmpfs at `/tmp` — enough scratch for concurrent uploads and their
+staged previews — and its built-in health check calls `GET /api/v1/readyz` every 30 seconds
+with a 15-second start period:
 
 ```sh
 docker compose ps
-curl -fsS https://omron.example.com/api/v1/healthz
+curl -fsS https://omron.example.com/api/v1/healthz   # liveness
+curl -fsS https://omron.example.com/api/v1/readyz    # readiness: database and migrations
 ```
 
-That endpoint is the only data endpoint that needs no token (the schema and the docs page are
-open too, and carry no data), so it is the one to put in a monitor.
+Both probe endpoints need no token (the schema and the docs page are open too, and carry no
+data), so they are the ones to put in a monitor. `readyz` opens the database and checks that
+all migrations are applied, answering `503` while they are not; `healthz` answers regardless
+of the database, so a broken data volume shows up as unhealthy instead of as a container
+that looks fine while every page 500s.
 `/admin/` exists for an administrator; the pages a person uses are in the header:
 *Readings*, *Imports* and *Tokens*.
 
@@ -270,10 +277,13 @@ to `staticfiles/` unless `OMRON_STATIC_ROOT` says otherwise:
 
 ```sh
 uv run python manage.py collectstatic --noinput
+export OMRON_DEBUG=true
 uv run python -m tools.serve
 ```
 
-Without it the pages render unstyled, because the stylesheet is not where the server looks
+A working copy serves plain HTTP directly, so run it with `OMRON_DEBUG=true`; with debug off
+the server refuses to start without `OMRON_TRUSTED_PROXY`, which only a reverse proxy can
+provide. Without it the pages render unstyled, because the stylesheet is not where the server looks
 for it. WhiteNoise reads the directory once at startup, so re-run `collectstatic` and
 restart the server after changing an asset. `staticfiles/` is gitignored, so a collected
 asset cannot end up in a commit.

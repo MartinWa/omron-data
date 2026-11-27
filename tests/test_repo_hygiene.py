@@ -295,14 +295,21 @@ def test_operational_tools_use_the_standard_library_only():
     serve = read("tools/serve.py")
     production = read("tools/check_production.py")
 
-    assert "/api/v1/healthz" in healthcheck
+    assert "/api/v1/readyz" in healthcheck
     assert 'os.environ.get("OMRON_PORT"' in healthcheck
     assert "TIMEOUT_SECONDS = 3.0" in healthcheck
     assert "status != 200" in healthcheck
     assert "from omron_data.wsgi import application" in serve
     assert 'positive_int("OMRON_THREADS"' in serve
     assert "threads=" in serve
-    for gate in ("settings.DEBUG", "PLACEHOLDER_SECRET_KEYS", "mode=rw", "migration_plan"):
+    assert "verify_proxy_configuration()" in serve
+    for gate in (
+        "settings.DEBUG",
+        "check_trusted_proxy",
+        "PLACEHOLDER_SECRET_KEYS",
+        "mode=rw",
+        "migration_plan",
+    ):
         assert gate in production
 
 

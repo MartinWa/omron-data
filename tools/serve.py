@@ -45,6 +45,23 @@ def proxy_options() -> dict:
     }
 
 
+def verify_proxy_configuration() -> None:
+    if settings.DEBUG or settings.OMRON_TRUSTED_PROXY:
+        return
+    raise SystemExit(
+        "OMRON_TRUSTED_PROXY is empty while OMRON_DEBUG is false. The session and CSRF "
+        "cookies are Secure then, so the app must sit behind a TLS proxy, and waitress "
+        "discards X-Forwarded-Proto from any peer it has not been told to trust — every "
+        "browser login would fail the CSRF origin check. Set OMRON_TRUSTED_PROXY (for "
+        "example * or the proxy's address), or OMRON_DEBUG=true for local direct access."
+    )
+
+
+def listen_address(port: int) -> str:
+    host = "127.0.0.1" if settings.DEBUG else "*"
+    return f"{host}:{port}"
+
+
 def database_path() -> Path:
     return Path(settings.DATABASES["default"]["NAME"])
 
@@ -65,9 +82,10 @@ def verify_data_directory() -> None:
 
 
 def main() -> int:
+    verify_proxy_configuration()
     verify_data_directory()
     call_command("migrate", interactive=False)
-    listen = f"*:{positive_int('OMRON_PORT', DEFAULT_PORT)}"
+    listen = listen_address(positive_int("OMRON_PORT", DEFAULT_PORT))
     threads = positive_int("OMRON_THREADS", DEFAULT_THREADS)
     serve(
         application,

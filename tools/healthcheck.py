@@ -1,11 +1,11 @@
-"""Probe the liveness endpoint the container health check watches."""
+"""Probe the readiness endpoint the container health check watches."""
 
 import http.client
 import os
 import sys
 
 TIMEOUT_SECONDS = 3.0
-HEALTH_PATH = "/api/v1/healthz"
+HEALTH_PATH = "/api/v1/readyz"
 DEFAULT_PORT = "8000"
 
 
