@@ -89,7 +89,7 @@
 <div class="report-grid">
   <section class="card report-card">
     <div class="card-head">
-      <h2>Readings per week</h2>
+      <h2>Readings per {{ weekly.noun }}</h2>
       <span class="muted small">{{ weekly.total }} in {{ weekly.buckets }} {{ weekly.noun }}{{ weekly.buckets|pluralize }}</span>
     </div>
     {% if weekly.has_points %}
@@ -107,7 +107,7 @@
       {% endif %}
       <div class="table-wrap">
         <table class="table">
-          <caption class="visually-hidden">Readings per week for {{ period_label }}</caption>
+          <caption class="visually-hidden">Readings per {{ weekly.noun }} for {{ period_label }}</caption>
           <thead>
             <tr><th scope="col">Period</th><th scope="col" class="num">Readings</th><th scope="col">Note</th></tr>
           </thead>

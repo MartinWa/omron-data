@@ -159,7 +159,9 @@ page computes a coordinate, and no template does arithmetic.
   rendered as a `<title>` inside each `<polyline>`, so hovering the line names the series. The
   `<svg>` itself is the single tab stop (`tabindex="0"`, it already carries the `aria-label`);
   dots and marks carry no tabindex — `chart-tips.js` moves an internal active point across the
-  markers with the arrow keys (Home/End jump to the ends) and marks it with
+  navigable markers (`.chart-dot:not(.avg):not(.outlier)`, `.chart-bar` — decorative outlier
+  rings and average markers are skipped, and the tip hides when the active point has no
+  `<title>`) with the arrow keys (Home/End jump to the ends) and marks it with
   `.chart-point-active`. A line may carry `marks` — outlier readings —
   rendered as decorative `chart-dot … outlier` rings (`fill: none; pointer-events: none`, no
   `<title>`, so the category-coloured dot underneath keeps the hover and AT text). The
@@ -232,9 +234,12 @@ page computes a coordinate, and no template does arithmetic.
   the 14px minimum, with the `.heatmap-weeks` heading row stretching the same way and Mon–Sun
   labels on the left) above a `.report-grid` holding the
   `_weekly_card` and `_weekday_card` side by side, both on the tall 380 frame.
-  `_weekly_card` bounds itself: more than `MAX_HEATMAP_COLUMNS` (54) resolved weeks aggregate
-  the bars to month buckets (`partial_buckets(..., "month")`), and if even that exceeds 54 the
-  window is clamped to the most recent 54 months, with an `aggregate_note` under the chart.
+  `_weekly_card` bounds itself before allocating anything: `_bucket_count` counts the buckets of
+  the resolved range arithmetically, and only when that exceeds `MAX_HEATMAP_COLUMNS` (54) weeks
+  does it switch to month buckets (`partial_buckets(..., "month")`), clamping the window to the
+  most recent 54 months if even that exceeds 54 — the full weekly bucket map is never built for
+  a long range (`resolve_range` no longer carries one), the heading and table caption switch to
+  "Readings per month", and an `aggregate_note` sits under the chart.
   `_day_start` converts local midnight to UTC itself and clamps to `datetime.min` UTC on
   overflow, so a `date.min` bound can never raise while preparing a query. Drill-down charts
   (`build_metric_dashboard`) draw a dot per point (`dots_all`) with a per-point `<title>`, so
@@ -299,7 +304,9 @@ page computes a coordinate, and no template does arithmetic.
   directly. The overview's `build_dashboards` stays light: it computes only the KPI cards, the
   section summary cards (from the in-window latest BP pair and latest weight) and the extremes
   list — no chart dicts. `last_reading_days` is measured against the real `today`, not the
-  range end, so a historical custom range reports the true age. The composition card's
+  range end, so a historical custom range reports the true age. The readings view reuses the
+  same guarded `_day_start` for its `from`/`to` query bounds, so `?from=0001-01-01` cannot raise
+  while converting local midnight to UTC. The composition card's
   `links`/`rows_url` point at `/readings/?metric=…&from=…&to=…` — the paginated readings view
   filtered to the metric and the resolved window — not the 500-row-capped drill-down.
 

@@ -8,6 +8,7 @@ from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.contrib.staticfiles import finders
 from django.urls import reverse
+from django.utils import timezone
 
 from parsing.report import parse_text
 from records.importer import import_readings
@@ -196,6 +197,18 @@ def test_the_date_filters_include_the_whole_boundary_day(client):
 
     assert content.count(DETAILS) == 2
     assert "72.3" not in content
+
+
+@pytest.mark.django_db
+def test_the_date_filter_bounds_never_raise_for_date_min(client):
+    owner = get_user_model().objects.create_user(username="alice")
+    client.force_login(owner)
+
+    today = timezone.localdate().isoformat()
+    response = client.get(reverse("readings"), {"from": "0001-01-01", "to": today})
+    assert response.status_code == 200
+    response = client.get(reverse("readings"), {"from": "0001-01-01"})
+    assert response.status_code == 200
 
 
 @pytest.mark.django_db

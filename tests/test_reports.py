@@ -291,10 +291,12 @@ def test_resolve_range_uses_the_custom_from_and_to_and_the_equal_window_before_i
     assert resolved["end"] == today
     assert resolved["previous"] == {"start": date(2026, 1, 7), "end": date(2026, 1, 16)}
     assert resolved["label"] == "17 Jan – 26 Jan 2026"
-    assert resolved["partial"][date(2026, 1, 12)]["partial"] is False
-    assert resolved["partial"][date(2026, 1, 12)]["note"] == "partial week, 2 of 7 days"
-    assert resolved["partial"][date(2026, 1, 26)]["partial"] is True
-    assert resolved["partial"][date(2026, 1, 26)]["in_progress"] is True
+    assert "partial" not in resolved
+    partial = partial_buckets(resolved["start"], resolved["end"], "week", today=today)
+    assert partial[date(2026, 1, 12)]["partial"] is False
+    assert partial[date(2026, 1, 12)]["note"] == "partial week, 2 of 7 days"
+    assert partial[date(2026, 1, 26)]["partial"] is True
+    assert partial[date(2026, 1, 26)]["in_progress"] is True
 
 
 def test_resolve_range_clamps_a_custom_end_to_today():

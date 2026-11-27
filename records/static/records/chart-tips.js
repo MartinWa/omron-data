@@ -39,7 +39,7 @@
   }
 
   document.querySelectorAll("svg.chart").forEach(function (svg) {
-    const markers = Array.from(svg.querySelectorAll(".chart-dot:not(.avg), .chart-bar"));
+    const markers = Array.from(svg.querySelectorAll(".chart-dot:not(.avg):not(.outlier), .chart-bar"));
     let active = -1;
 
     function setActive(index) {
@@ -50,6 +50,7 @@
       marker.classList.add("chart-point-active");
       const text = titleOf(marker);
       if (text) show(svg, marker, text);
+      else hide(svg);
     }
 
     svg.addEventListener("keydown", function (event) {

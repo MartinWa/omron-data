@@ -163,6 +163,18 @@ def _iter_buckets(start, end, bucket):
             current = current.replace(year=current.year + 1)
 
 
+def _bucket_count(start, end, bucket):
+    first = _bucket_start(start, bucket)
+    last = _bucket_start(end, bucket)
+    if bucket == "day":
+        return (last - first).days + 1
+    if bucket == "week":
+        return (last - first).days // 7 + 1
+    if bucket == "month":
+        return (last.year * 12 + last.month) - (first.year * 12 + first.month) + 1
+    return last.year - first.year + 1
+
+
 def partial_buckets(start, end, bucket, noun="", today=None):
     label = noun or bucket
     reference = end if today is None else today
@@ -607,7 +619,6 @@ def resolve_range(key, today, earliest, date_from=None, date_to=None):
             "bucket": "week",
             "previous": previous,
             "label": period_label(start, end),
-            "partial": partial_buckets(start, end, "week", today=today),
         }
     previous = None
     if key == "all":
@@ -624,7 +635,6 @@ def resolve_range(key, today, earliest, date_from=None, date_to=None):
         "bucket": "week",
         "previous": previous,
         "label": period_label(start, today),
-        "partial": partial_buckets(start, today, "week", today=today),
     }
 
 
@@ -1557,20 +1567,19 @@ def _weekly_card(series, resolved, today):
     start = resolved["start"]
     end = resolved["end"]
     bucket = "week"
-    partial = resolved["partial"]
     aggregate_note = ""
-    if len(partial) > MAX_HEATMAP_COLUMNS:
+    if _bucket_count(start, end, "week") > MAX_HEATMAP_COLUMNS:
         bucket = "month"
-        partial = partial_buckets(start, end, "month", today=today)
         aggregate_note = (
             f"Bars aggregated per month: the range spans more than {MAX_HEATMAP_COLUMNS} weeks."
         )
-        if len(partial) > MAX_HEATMAP_COLUMNS:
+        if _bucket_count(start, end, "month") > MAX_HEATMAP_COLUMNS:
             start = _shift_months(_bucket_start(end, "month"), 1 - MAX_HEATMAP_COLUMNS)
-            partial = partial_buckets(start, end, "month", today=today)
             aggregate_note = (
-                f"Bars aggregated per month and capped to the most recent {len(partial)} months."
+                "Bars aggregated per month and capped to the most recent "
+                f"{MAX_HEATMAP_COLUMNS} months."
             )
+    partial = partial_buckets(start, end, bucket, today=today)
     counts = {}
     for point in _range_readings(series, start, end):
         key = _bucket_start(point["date"], bucket)

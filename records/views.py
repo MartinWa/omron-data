@@ -1,8 +1,7 @@
 import hmac
 import io
-from datetime import date, datetime, time, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
-from zoneinfo import ZoneInfo
 
 from django import forms
 from django.conf import settings
@@ -29,6 +28,7 @@ from .management.commands.import_omron import LABELS
 from .models import COMPONENTS, METRICS, PANEL, ApiToken, ImportRun, Measurement
 from .reports import (
     METRIC_LABELS,
+    _day_start,
     build_dashboard_consistency,
     build_dashboard_weight,
     build_dashboards,
@@ -59,14 +59,6 @@ UNKNOWN_METRIC_MESSAGE = "That metric is not available."
 COMPONENT_ORDER = {code: index for index, code in enumerate(COMPONENTS)}
 GAP_DAYS = GAP.total_seconds() / 86400
 GAP_SLACK = 0.000001
-
-
-def _zone() -> ZoneInfo:
-    return ZoneInfo(settings.OMRON_TIME_ZONE)
-
-
-def _day_start(value: date) -> datetime:
-    return datetime.combine(value, time.min, tzinfo=_zone())
 
 
 def _optional_date(value):

@@ -25,6 +25,7 @@ from records.reports import (
     TALL_CHART_HEIGHT,
     WEEKDAYS,
     _bp_category,
+    _bucket_count,
     _day_start,
     _fetch_window,
     _history,
@@ -787,7 +788,8 @@ def test_the_heatmap_follows_the_resolved_range(signed_in):
     assert consistency["window_label"] == week.context["range"]["label"]
     assert consistency["readings"] == week.context["readings_total"]
     weekly = week.context["weekly"]
-    assert len(weekly["chart"]["bars"]) == len(week.context["range"]["partial"])
+    rng = week.context["range"]
+    assert len(weekly["chart"]["bars"]) == _bucket_count(rng["start"], rng["end"], "week")
     assert weekly["chart"]["bars"][-1]["in_progress"] is True
     body = content_of(week)
     assert f"{consistency['window_label']} · {consistency['days']} days with readings" in body
@@ -1984,7 +1986,8 @@ def test_the_chart_tip_script_shows_and_hides_the_tip_from_the_shape_title():
     assert "ArrowDown" in script and "ArrowUp" in script
     assert "Home" in script and "End" in script
     assert "chart-point-active" in script
-    assert ".chart-dot:not(.avg), .chart-bar" in script
+    assert ".chart-dot:not(.avg):not(.outlier), .chart-bar" in script
+    assert "else hide(svg);" in script
 
 
 def test_the_builders_return_the_whole_page_without_a_request(owner):
@@ -2215,6 +2218,8 @@ def test_the_weekly_card_aggregates_to_months_for_a_long_range(client, db):
     assert weekly["rows_total"] == weekly["buckets"]
     assert weekly["aggregate_note"].startswith("Bars aggregated per month")
     assert weekly["aggregate_note"] in body
+    assert "<h2>Readings per month</h2>" in body
+    assert "Readings per month for " in body
     assert weekly["chart"]["aria_label"].startswith("Readings per month from ")
     assert re.fullmatch(r"[A-Z][a-z]{2} \d{4}", weekly["chart"]["bars"][0]["title"].split(":")[0])
     assert weekly["rows_url"] == "/readings/"
@@ -2235,8 +2240,58 @@ def test_the_weekly_card_caps_months_for_a_huge_custom_range(signed_in):
 
     assert weekly["noun"] == "month"
     assert len(weekly["chart"]["bars"]) <= MAX_HEATMAP_COLUMNS
+    assert weekly["rows_total"] == weekly["buckets"] <= MAX_HEATMAP_COLUMNS
     assert "capped to the most recent" in weekly["aggregate_note"]
     assert weekly["aggregate_note"] in content_of(response)
+    assert "partial" not in response.context["range"]
+
+
+def test_the_weekly_card_allocates_only_the_buckets_it_uses_for_a_long_range(signed_in):
+    today = timezone.localdate()
+    response = signed_in.get(
+        reverse("dashboard_consistency"),
+        {
+            "range": "custom",
+            "from": (today - timedelta(days=799)).isoformat(),
+            "to": today.isoformat(),
+        },
+    )
+    weekly = response.context["weekly"]
+    rng = response.context["range"]
+
+    assert _bucket_count(rng["start"], rng["end"], "week") > MAX_HEATMAP_COLUMNS
+    assert weekly["noun"] == "month"
+    assert len(weekly["chart"]["bars"]) == weekly["buckets"] <= MAX_HEATMAP_COLUMNS
+    assert weekly["rows_total"] == weekly["buckets"]
+    assert "partial" not in rng
+
+
+def test_outlier_rings_have_no_title_and_are_outside_the_navigable_selector(client, db):
+    user = get_user_model().objects.create_user(username="ring-nav")
+    at = moment(timezone.localdate())
+    panel = Measurement.objects.create(owner=user, metric=PANEL, at=at, unit="", note="")
+    rows = []
+    for metric, value in (("systolic_bp", 141), ("diastolic_bp", 92), ("pulse", 70)):
+        row = measurement(user, metric, at, value)
+        row.parent = panel
+        rows.append(row)
+    Measurement.objects.bulk_create(rows)
+    client.force_login(user)
+
+    body = content_of(client.get(bp_url(), {"range": "all"}))
+    dots = re.findall(r'<circle class="chart-dot([^"]*)"[^>]*>(.*?)</circle>', body, re.S)
+    rings = [classes for classes, inner in dots if "outlier" in classes]
+    plain = [(classes, inner) for classes, inner in dots if "outlier" not in classes]
+
+    assert rings
+    assert all(
+        "<title>" not in inner
+        for classes, inner in dots
+        if "outlier" in classes or "avg" in classes
+    )
+    assert all("<title>" in inner for classes, inner in plain if "avg" not in classes)
+    script = Path(finders.find("records/chart-tips.js")).read_text(encoding="utf-8")
+    assert ".chart-dot:not(.avg):not(.outlier), .chart-bar" in script
 
 
 def test_the_weekly_card_keeps_week_buckets_for_normal_ranges(signed_in):
@@ -2245,7 +2300,11 @@ def test_the_weekly_card_keeps_week_buckets_for_normal_ranges(signed_in):
 
     assert weekly["noun"] == "week"
     assert weekly["aggregate_note"] == ""
-    assert len(weekly["chart"]["bars"]) == len(response.context["range"]["partial"])
+    rng = response.context["range"]
+    assert len(weekly["chart"]["bars"]) == _bucket_count(rng["start"], rng["end"], "week")
+    body = content_of(response)
+    assert "<h2>Readings per week</h2>" in body
+    assert "Readings per week for " in body
 
 
 def test_the_extremes_row_carries_the_unit_and_a_single_reading_is_not_repeated(
