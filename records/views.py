@@ -1,8 +1,7 @@
 import hmac
 import io
-from datetime import date, datetime, time, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
-from zoneinfo import ZoneInfo
 
 from django import forms
 from django.conf import settings
@@ -27,7 +26,14 @@ from .limits import MAX_REQUEST_BODY_BYTES, MAX_UPLOAD_BYTES, MAX_UPLOAD_MEGABYT
 from .management.commands.coverage import GAP
 from .management.commands.import_omron import LABELS
 from .models import COMPONENTS, METRICS, PANEL, ApiToken, ImportRun, Measurement
-from .reports import METRIC_LABELS, build_dashboards, build_metric_dashboard
+from .reports import (
+    METRIC_LABELS,
+    _day_start,
+    build_dashboard_consistency,
+    build_dashboard_weight,
+    build_dashboards,
+    build_metric_dashboard,
+)
 from .templatetags.formatting import num
 from .tokens import issue
 
@@ -53,14 +59,6 @@ UNKNOWN_METRIC_MESSAGE = "That metric is not available."
 COMPONENT_ORDER = {code: index for index, code in enumerate(COMPONENTS)}
 GAP_DAYS = GAP.total_seconds() / 86400
 GAP_SLACK = 0.000001
-
-
-def _zone() -> ZoneInfo:
-    return ZoneInfo(settings.OMRON_TIME_ZONE)
-
-
-def _day_start(value: date) -> datetime:
-    return datetime.combine(value, time.min, tzinfo=_zone())
 
 
 def _optional_date(value):
@@ -226,11 +224,34 @@ def dashboards(request):
 
 
 @login_required
+def dashboard_weight(request):
+    return render(
+        request,
+        "records/dashboard_weight.html",
+        build_dashboard_weight(request.user, request.GET, timezone.localdate()),
+    )
+
+
+@login_required
+def dashboard_consistency(request):
+    return render(
+        request,
+        "records/dashboard_consistency.html",
+        build_dashboard_consistency(request.user, request.GET, timezone.localdate()),
+    )
+
+
+@login_required
 def dashboard_metric(request, metric):
     context = build_metric_dashboard(request.user, metric, request.GET, timezone.localdate())
     if context is None:
         raise Http404(UNKNOWN_METRIC_MESSAGE)
-    return render(request, "records/dashboard_metric.html", context)
+    template = (
+        "records/dashboard_blood_pressure.html"
+        if metric == PANEL
+        else "records/dashboard_metric.html"
+    )
+    return render(request, template, context)
 
 
 def _stamp(at: datetime) -> str:

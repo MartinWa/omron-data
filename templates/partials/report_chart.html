@@ -1,11 +1,11 @@
-<svg class="chart chart-{{ chart.kind }}" viewBox="0 0 {{ chart.width }} {{ chart.height }}" role="img" aria-label="{{ chart.aria_label }}" preserveAspectRatio="xMidYMid meet">
+<svg class="chart chart-{{ chart.kind }}" viewBox="0 0 {{ chart.width }} {{ chart.height }}" role="img" aria-label="{{ chart.aria_label }}"{% if chart.kind == "bars" or chart.lines %} tabindex="0"{% endif %} preserveAspectRatio="xMidYMid meet">
   <g class="chart-grid" aria-hidden="true">
     {% for tick in chart.ticks %}
     <line class="chart-gridline" x1="{{ chart.left }}" y1="{{ tick.y }}" x2="{{ chart.right_edge }}" y2="{{ tick.y }}"></line>
     <text class="chart-tick" x="{{ chart.left }}" y="{{ tick.y }}" dx="-8" dy="4" text-anchor="end">{{ tick.label }}</text>
     {% endfor %}
     {% for label in chart.xlabels %}
-    <text class="chart-tick chart-tick-x" x="{{ label.x }}" y="{{ chart.plot_bottom }}" dy="20" text-anchor="middle">{{ label.label }}</text>
+    <text class="chart-tick chart-tick-x" x="{{ label.x }}" y="{{ chart.plot_bottom }}" dy="20" text-anchor="{% if forloop.first %}start{% elif forloop.last %}end{% else %}middle{% endif %}">{{ label.label }}</text>
     {% endfor %}
   </g>
   {% if chart.kind == "bars" %}
@@ -16,18 +16,31 @@
     </rect>
     {% endfor %}
   </g>
-  {% if chart.has_line %}
-  {% for segment in chart.segments %}
-  <polyline class="chart-line series-1" points="{{ segment }}" fill="none"></polyline>
-  {% endfor %}
-  {% endif %}
   {% else %}
   <g class="chart-lines">
     {% for line in chart.lines %}
-    <polyline class="chart-line {{ line.class }}" points="{{ line.points }}" fill="none"></polyline>
-    {% for dot in line.dots %}<circle class="chart-dot {{ line.class }}" cx="{{ dot.x }}" cy="{{ dot.y }}" r="3"></circle>{% endfor %}
+    {% for segment in line.segments %}
+    <polyline class="chart-line {{ line.class }}" points="{{ segment }}" fill="none"><title>{{ line.title }}</title></polyline>
+    {% endfor %}
+    {% endfor %}
+  </g>
+  <g class="chart-dots">
+    {% for line in chart.lines %}
+    {% for dot in line.dots %}
+    {% if "series-3" in line.class %}
+    <polygon class="chart-dot {{ line.class }}{% if dot.class %} {{ dot.class }}{% endif %}" points="{{ dot.points }}">{% if dot.title %}<title>{{ dot.title }}</title>{% endif %}</polygon>
+    {% elif "series-2" in line.class or "series-4" in line.class %}
+    <rect class="chart-dot {{ line.class }}{% if dot.class %} {{ dot.class }}{% endif %}" x="{{ dot.x }}" y="{{ dot.y }}" width="{{ dot.width }}" height="{{ dot.height }}">{% if dot.title %}<title>{{ dot.title }}</title>{% endif %}</rect>
+    {% else %}
+    <circle class="chart-dot {{ line.class }}{% if dot.class %} {{ dot.class }}{% endif %}" cx="{{ dot.x }}" cy="{{ dot.y }}" r="3">{% if dot.title %}<title>{{ dot.title }}</title>{% endif %}</circle>
+    {% endif %}
+    {% endfor %}
+    {% for mark in line.marks %}
+    <circle class="chart-dot {{ mark.class }} outlier" cx="{{ mark.x }}" cy="{{ mark.y }}" r="4"></circle>
+    {% endfor %}
     {% endfor %}
   </g>
   {% endif %}
   <line class="chart-axis" x1="{{ chart.left }}" y1="{{ chart.plot_bottom }}" x2="{{ chart.right_edge }}" y2="{{ chart.plot_bottom }}" aria-hidden="true"></line>
+  <g class="chart-tip" visibility="hidden" aria-hidden="true"><rect class="chart-tip-box" rx="4"></rect><text class="chart-tip-text"></text></g>
 </svg>

@@ -20,9 +20,11 @@ on one host, no account anywhere else, and each person's history is their own.
   nothing loaded from a CDN
 - Merge, never replace: each export is a window, so imports add to the history and skip
   what is already stored
-- Dashboards over the stored history: blood pressure, weight, body composition,
-  consistency and readings per week, drawn as inline SVG in either theme, printable, and
-  each chart carries its numbers in a table
+- Dashboards over the stored history, each section on its own page behind a sub-navigation:
+  overview with KPIs and extremes, blood pressure (with AHA-category coloured dots), weight &
+  composition, and consistency, plus a drill-down per metric — drawn as inline SVG in either
+  theme with a hover title on every line, dot and bar (the dots are keyboard-focusable),
+  printable, and each chart carries its numbers in a table
 - Read-only, versioned, owner-scoped API with a contract envelope on every response, where
   a blood-pressure reading is a panel with systolic, diastolic and pulse components,
   matching how it is actually taken

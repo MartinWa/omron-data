@@ -7,6 +7,8 @@ urlpatterns = [
     path("", RedirectView.as_view(pattern_name="readings", permanent=False), name="home"),
     path("readings/", views.readings, name="readings"),
     path("dashboards/", views.dashboards, name="dashboards"),
+    path("dashboards/weight/", views.dashboard_weight, name="dashboard_weight"),
+    path("dashboards/consistency/", views.dashboard_consistency, name="dashboard_consistency"),
     path("dashboards/<slug:metric>/", views.dashboard_metric, name="dashboard_metric"),
     path("imports/", views.imports, name="imports"),
     path("imports/preview/", views.import_preview, name="import_preview"),

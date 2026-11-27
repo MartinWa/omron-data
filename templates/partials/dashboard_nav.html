@@ -1,0 +1,7 @@
+<nav class="dashboard-nav" aria-label="Dashboards">
+  <span class="segmented" role="group" aria-label="Dashboard sections">
+    {% for item in dashboard_nav %}
+    <a class="segmented-item{% if item.current %} is-current{% endif %}" href="{{ item.url }}"{% if item.current %} aria-current="page"{% endif %}>{{ item.label }}</a>
+    {% endfor %}
+  </span>
+</nav>

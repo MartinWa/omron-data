@@ -48,6 +48,13 @@ def kg(value):
 
 
 @register.filter
+def axis_unit(unit):
+    if not unit:
+        return ""
+    return unit if unit == "%" else f" {unit}"
+
+
+@register.filter
 def elided_pages(page):
     return page.paginator.get_elided_page_range(page.number, on_each_side=1, on_ends=1)
 
