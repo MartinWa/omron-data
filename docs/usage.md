@@ -206,43 +206,86 @@ is refused by the API and can be deleted straight away. Replace a lost secret wi
 token rather than trying to recover the old one. See [API](api.md) for how a request
 authenticates.
 
-## The dashboards page
+## The dashboards pages
 
-`/dashboards/` turns the stored history into six KPI cards, five chart cards and a list of
-extremes. Every number on the page comes from the stored rows, so a reading you have not
-imported cannot appear in a chart. The line under the heading states the window, how many
-readings it holds, how long ago the newest of them was taken (*last reading today*, or
-*last reading N days ago*) and when the last import ran.
+`/dashboards/` turns the stored history into six KPI cards, three section cards that summarise
+and link to the dedicated pages, and a list of extremes. Every number on every page comes from
+the stored rows, so a reading you have not imported cannot appear in a chart. The line under
+the heading states the window, how many readings it holds, how long ago the newest of them was
+taken (*last reading today*, or *last reading N days ago*) and when the last import ran. Every
+chart element carries its numbers as a hover title — each line names its series, each dot its
+reading with date, time and value, each bar its bucket and its count — and a visible tooltip
+follows the mouse or the keyboard focus over every dot, line and bar, while the dots are
+keyboard-focusable, so the same text is reachable without a mouse.
+
+### The sub-navigation
+
+Every dashboards page carries a sub-navigation under the page head — *Overview*,
+*Blood pressure*, *Weight & composition* and *Consistency* — drawn with the same segmented
+control as the range chips. Its links keep the current `?range=` and `?metric=` parameters, so
+switching sections does not lose the selected window, and the current page's item is marked
+with `aria-current="page"`. The *Dashboards* item in the main navigation stays active on all
+of these pages.
+
+| Page | Shows |
+| --- | --- |
+| `/dashboards/` | The KPI row, the three section cards (blood pressure: latest pair and AHA category; weight & composition: latest weight and its delta; consistency: readings in range) with links to the pages below, and the extremes list |
+| `/dashboards/blood_pressure/` | The blood-pressure panel: systolic and diastolic with dots coloured by AHA category and outlier rings, the pulse chart on its own scale, legends, and the capped data table |
+| `/dashboards/weight/` | Two cards stacked full-width one under the other, like the blood-pressure page: the weight card (daily line plus the dashed 7-day rolling average, legend and table), then the body-composition card — body fat and skeletal muscle together by default behind one *Body fat & muscle* pill, with the switcher for the other metrics |
+| `/dashboards/consistency/` | The full-width consistency heatmap card (week headings above the columns, weekday labels on the left, its own table), then the readings-per-week and readings-per-weekday cards side by side in a two-column grid, each with its table |
+| `/dashboards/<metric>/` | The drill-down for any other metric, described under [the metric drill-down](#the-metric-drill-down) |
 
 ### The range control
 
-Four chips select the window: *30 days*, *90 days*, *1 year* and *All time*, with 30 days as
-the default. The window is the time up to today, so *30 days* means today and the 29 days
-before it. The choice lives in the URL (`?range=90d`) and survives the body-composition
-switch and a drill-down, so a view can be bookmarked. An unknown value falls back to the
-default. A window that holds no readings shows a notice with a *Show all time* link instead
-of empty charts, and an account with no readings at all is sent to the import page.
+Six chips select the window: *Last 7 days*, *30 days*, *90 days*, *1 year*, *All time* and
+*Custom*, with 30 days as the default. The fixed windows are the time up to today, so
+*Last 7 days* means today and the 6 days before it, and *30 days* means today and the
+29 days before it. The choice lives in the URL (`?range=7d`) and survives the
+sub-navigation, the body-composition switch and a drill-down, so a view can be bookmarked.
+Because those switches are same-page links, the page remembers the scroll position and puts
+you back where you were after the reload. An unknown value falls back to the default.
+
+The *Custom* chip is a button that opens a panel as wide as the toolbar bar, with the two date
+fields (FROM/TO) and an *Apply* button in a row (wrapping on narrow screens); applying submits
+`?range=custom&from=YYYY-MM-DD&to=YYYY-MM-DD` as a normal page load, while Esc or a click
+outside closes the popover without changing anything. While a custom window is active the
+chip names it, for example *Custom · 10 – 24 Nov 2026*. The end is clamped to
+today, and a missing, invalid or reversed `from`/`to` falls back to the default window.
+The popover's date fields carry the current window's start and end (last 30 days when no
+window is selected yet), and the other chips drop `from`/`to` from their links. A custom window's KPI
+deltas compare against the window of the same length immediately before `from`, named
+*versus the previous period* for screen readers. A window that holds no readings shows a
+notice with a *Show all time* link instead of empty charts, and an account with no readings
+at all is sent to the import page. KPI deltas name their comparison out loud for screen
+readers — *versus the previous 7 days*, *versus the previous 30 days* and so on.
 
 ### What each card shows
 
-| Card | Shows |
-| --- | --- |
-| *Latest blood pressure*, *7-day average*, *Latest weight*, *Weight change*, *Readings in range*, *Last import* | The KPI row. Every value carries its unit and the precision the metric deserves: whole mmHg for blood pressure, one decimal for kilograms and percentages. The *7-day average* adds a sub-line, *based on N readings*, and compares the systolic 7-day mean with the mean of the last 7 days of the previous window as an absolute `+20 mmHg`-style delta; *Latest weight* and *Weight change* compare kilograms (`−0.4 kg`); *Readings in range* stays a percentage. A delta is coloured by what it means, not just by its arrow: red when the move is worse (a rise in blood pressure), green when it is better, grey when the metric carries no good or bad direction (weight, counts). The comparison is spelled out for a screen reader. *All time* has no earlier window, and *Weight change* is the first reading against the last inside the range |
-| *Blood pressure* | Two panels sharing one x axis. The first draws systolic and diastolic as lines with a dot per reading, a dashed 7-day rolling average of each, and shaded reference bands (below); readings at or above 140 systolic or 90 diastolic also get a ringed outlier dot. The second draws the pulse alone on its own `/min` scale. The card head names the latest pair and its AHA category, for example *Latest 129/73 · AHA category: Normal* |
-| *Weight* | One line of daily weigh-ins with a dot per reading, plus the dashed 7-day rolling average, which appears only once seven days of history exist in the range. The last reading gets an emphasised dot. Both lines break across gaps longer than 7 days |
-| *Body composition* | One metric at a time, chosen from *Body fat*, *Skeletal muscle*, *Visceral fat*, *Resting metabolism* and *Impedance*, so a percentage never shares an axis with a kilogram. The choice is in the URL (`?metric=`). Each metric plots against the fixed display domain in the table below; when the data falls outside it the domain widens instead of clipping the line |
-| *Consistency* | A heatmap of the last 364 days, one cell per day in four levels from none to three or more readings, with month labels. Hovering a cell gives its date and count; a visually hidden paragraph summarises the whole heatmap for a screen reader, and the table below lists the days that have readings |
-| *Readings per week* | One bar per week with the number of readings in it, the week in progress shaded. Bars keep a zero baseline, because a bar is a magnitude and every bar left on the page is a count |
-| *Extremes* | Latest, high and low for each metric, each value with its unit and its date, plus how many readings it is based on. A metric with a single reading shows only the latest, without repeating it as high and low. Each name links to that metric's drill-down |
+| Card | Page | Shows |
+| --- | --- | --- |
+| *Latest blood pressure*, *7-day average*, *Latest weight*, *Weight change*, *Readings*, *Last import* | `/dashboards/` | The KPI row. Every value carries its unit and the precision the metric deserves: whole mmHg for blood pressure, one decimal for kilograms and percentages. The *7-day average* adds a sub-line, *based on N readings*, and compares the systolic 7-day mean with the mean of the last 7 days of the previous window as an absolute `+20 mmHg`-style delta; *Latest weight* and *Weight change* compare kilograms (`−0.4 kg`); *Readings* stays a percentage. A delta is coloured by what it means, not just by its arrow: red when the move is worse (a rise in blood pressure), green when it is better, grey when the metric carries no good or bad direction (weight, counts). The comparison is spelled out for a screen reader. *All time* has no earlier window, and *Weight change* is the first reading against the last inside the range |
+| *Blood pressure* | `/dashboards/blood_pressure/` | Two panels sharing one x axis. The first draws systolic and diastolic as lines with a dot per reading — each dot coloured by its AHA category (below), so the axis follows the data alone — a dashed 7-day rolling average of each that starts at the first reading, and a legend naming the lines and the category colours; readings at or above 140 systolic or 90 diastolic also get a ringed outlier dot. The second draws the pulse alone on its own `/min` scale. Axes for whole-number units (mmHg, `/min`, kcal, ohm) tick in whole numbers only. The card head names the latest pair and its AHA category, for example *Latest 129/73 · AHA category: Normal* |
+| *Weight* | `/dashboards/weight/` | One line of daily weigh-ins with a dot per reading, plus the dashed 7-day rolling average, which starts at the first reading in the range (a trailing 7-day window of the available readings), with a legend naming both lines. The last reading gets an emphasised dot. Both lines break only across gaps longer than 7 days |
+| *Body composition* | `/dashboards/weight/` | By default *Body fat* and *Skeletal muscle* are drawn together on one chart — both are percentages, so they share one percent axis, and a percentage never shares an axis with a kilogram. The two lines differ in colour (teal versus amber), dash pattern and dot shape (solid circles versus dashed squares), each is followed by its own dashed, thinner 7-day rolling average line, and the legend names all four (*Body fat 7-day average (%)* and *Skeletal muscle 7-day average (%)* among them), and the table below lists date, body fat, skeletal muscle and note per reading, with links to each metric's own drill-down. The switcher in the card head has one *Body fat & muscle* pill for the pair — marked current whether the URL carries `?metric=body_fat_pct` or `?metric=skeletal_muscle_pct`, both of which show the same combined chart — plus *Visceral fat*, *Resting metabolism* and *Impedance* one at a time; the choice is in the URL (`?metric=`). Each single metric plots against the fixed display domain in the table below with its own dashed *<metric> 7-day average* line named in the legend; when the data falls outside the domain the domain widens instead of clipping the line |
+| *Consistency* | `/dashboards/consistency/` | A full-width heatmap of the selected window — the range chips and custom range reshape it, and *All time* spans the whole history — one cell per day in four levels from none to three or more readings — the square cells grow with the card up to a 26px cap and the grid centers itself when narrower, while a long range keeps the 14px minimum and scrolls horizontally — with a heading above the grid labeling week columns by their week-start date (thinned so the labels never collide, never on adjacent columns of a small grid) and weekday labels (Mon–Sun) on the left. The card head names the window with its counts. Hovering a cell gives its date and count; a visually hidden paragraph summarises the whole heatmap for a screen reader, and the table below lists the days that have readings |
+| *Readings per week* | `/dashboards/consistency/` | One bar per week with the number of readings in it; only the current week, still in progress, is shaded — a week truncated by the range start renders solid, though its title and table note still say how many of its days fall inside the range. Bars keep a zero baseline, because a bar is a magnitude and every bar left on the page is a count. Sits side by side with the weekday card below |
+| *Readings per weekday* | `/dashboards/consistency/` | One bar per weekday, Monday to Sunday, with the number of readings taken on that weekday in the selected window, and a table listing the same seven counts |
+| *Extremes* | `/dashboards/` | Latest, high and low for each metric, each value with its unit and its date, plus how many readings it is based on. A metric with a single reading shows only the latest, without repeating it as high and low. Each name links to that metric's drill-down |
 
 ### Blood-pressure reference
 
-The shaded bands on the blood-pressure chart are the AHA/ACC 2017 categories from
+Each dot on the blood-pressure chart is coloured by the AHA/ACC 2017 category of its reading,
+from
 [Understanding Blood Pressure Readings](https://www.heart.org/en/health-topics/high-blood-pressure/understanding-blood-pressure-readings):
-elevated at systolic 120–129, stage 1 at 130–139 and stage 2 at 140 and above, with the
-diastolic equivalents 80/90 mmHg. A reading's category is the higher of its systolic and its
-diastolic category (a crisis is above 180 systolic or 120 diastolic), and the card head reports
-the latest reading's category on the same scale.
+green for normal (systolic below 120), yellow for elevated (120–129), orange for stage 1
+(130–139), red for stage 2 (140 and above), with the diastolic equivalents 80/90 mmHg — so the
+y axis
+follows the data alone and one high reading never stretches the chart. So that the categories
+never depend on colour alone, a legend under the chart names every category with its colour
+(*Normal <120 mmHg*, *Elevated 120–129 mmHg*, *Stage 1 130–139 mmHg*, *Stage 2 ≥140 mmHg*),
+and each dot keeps its hover text with the exact value. A reading's category is the higher of
+its systolic and its diastolic category (a crisis is above 180 systolic or 120 diastolic), and
+the card head reports the latest reading's category on the same scale.
 
 A home blood-pressure average of 135/85 mmHg or more over seven days corresponds to an office
 reading of 140/90 mmHg under the 2017 ACC/AHA guideline
@@ -270,8 +313,8 @@ prints. The blood-pressure, weight, composition and readings-per-week tables lis
 200 most recent rows and say so (*Showing the 200 most recent of N …*) with a link to the full
 list: the readings page filtered to that metric for blood pressure and weight, the readings
 page for the weekly card, and the metric's own drill-down for composition. *Print* calls the
-browser's print dialog; printing hides the navigation, the toolbar and the range chips and
-opens every data table, so the page prints as a report even in the dark theme.
+browser's print dialog; printing hides the navigation, the sub-navigation, the toolbar and the
+range chips and opens every data table, so the page prints as a report even in the dark theme.
 
 ### The metric drill-down
 
@@ -282,6 +325,14 @@ value with unit, and *Show the numbers* with the readings themselves, newest fir
 note. The table lists the 500 most recent and says how many are hidden beyond that; the chart
 is not capped. An unknown metric in the path is a 404, and a metric with no readings in the
 selected window says so and offers *All time*.
+
+Two slugs are pages of their own rather than generic drill-downs: `/dashboards/blood_pressure/`
+renders the blood-pressure panel described above (the panel rows themselves carry no value, so
+the page is built from the systolic, diastolic and pulse components), and
+`/dashboards/body_weight/` draws two series — daily weight and the dashed 7-day rolling
+average (starting at the first reading, breaking only across gaps longer than 7 days), with
+a legend — and adds a *7-day average* column to its table, exactly like the
+weight card on `/dashboards/weight/`.
 
 ## From the command line
 

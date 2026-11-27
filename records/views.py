@@ -27,7 +27,13 @@ from .limits import MAX_REQUEST_BODY_BYTES, MAX_UPLOAD_BYTES, MAX_UPLOAD_MEGABYT
 from .management.commands.coverage import GAP
 from .management.commands.import_omron import LABELS
 from .models import COMPONENTS, METRICS, PANEL, ApiToken, ImportRun, Measurement
-from .reports import METRIC_LABELS, build_dashboards, build_metric_dashboard
+from .reports import (
+    METRIC_LABELS,
+    build_dashboard_consistency,
+    build_dashboard_weight,
+    build_dashboards,
+    build_metric_dashboard,
+)
 from .templatetags.formatting import num
 from .tokens import issue
 
@@ -226,11 +232,34 @@ def dashboards(request):
 
 
 @login_required
+def dashboard_weight(request):
+    return render(
+        request,
+        "records/dashboard_weight.html",
+        build_dashboard_weight(request.user, request.GET, timezone.localdate()),
+    )
+
+
+@login_required
+def dashboard_consistency(request):
+    return render(
+        request,
+        "records/dashboard_consistency.html",
+        build_dashboard_consistency(request.user, request.GET, timezone.localdate()),
+    )
+
+
+@login_required
 def dashboard_metric(request, metric):
     context = build_metric_dashboard(request.user, metric, request.GET, timezone.localdate())
     if context is None:
         raise Http404(UNKNOWN_METRIC_MESSAGE)
-    return render(request, "records/dashboard_metric.html", context)
+    template = (
+        "records/dashboard_blood_pressure.html"
+        if metric == PANEL
+        else "records/dashboard_metric.html"
+    )
+    return render(request, template, context)
 
 
 def _stamp(at: datetime) -> str:

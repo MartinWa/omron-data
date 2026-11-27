@@ -5,7 +5,7 @@
     <text class="chart-tick" x="{{ chart.left }}" y="{{ tick.y }}" dx="-8" dy="4" text-anchor="end">{{ tick.label }}</text>
     {% endfor %}
     {% for label in chart.xlabels %}
-    <text class="chart-tick chart-tick-x" x="{{ label.x }}" y="{{ chart.plot_bottom }}" dy="20" text-anchor="middle">{{ label.label }}</text>
+    <text class="chart-tick chart-tick-x" x="{{ label.x }}" y="{{ chart.plot_bottom }}" dy="20" text-anchor="{% if forloop.first %}start{% elif forloop.last %}end{% else %}middle{% endif %}">{{ label.label }}</text>
     {% endfor %}
   </g>
   {% if chart.kind == "bars" %}
@@ -17,31 +17,26 @@
     {% endfor %}
   </g>
   {% else %}
-  {% if chart.bands %}
-  <g class="chart-bands">
-    {% for band in chart.bands %}
-    <rect class="chart-band {{ band.class }}" x="{{ chart.left }}" y="{{ band.y }}" width="{{ chart.plot_width }}" height="{{ band.height }}">
-      <title>{{ band.label }}</title>
-    </rect>
-    {% endfor %}
-  </g>
-  {% endif %}
   <g class="chart-lines">
     {% for line in chart.lines %}
     {% for segment in line.segments %}
-    <polyline class="chart-line {{ line.class }}" points="{{ segment }}" fill="none"></polyline>
+    <polyline class="chart-line {{ line.class }}" points="{{ segment }}" fill="none"><title>{{ line.title }}</title></polyline>
     {% endfor %}
+    {% endfor %}
+  </g>
+  <g class="chart-dots">
+    {% for line in chart.lines %}
     {% for dot in line.dots %}
     {% if "series-3" in line.class %}
-    <polygon class="chart-dot {{ line.class }}{% if dot.class %} {{ dot.class }}{% endif %}" points="{{ dot.points }}">{% if dot.title %}<title>{{ dot.title }}</title>{% endif %}</polygon>
-    {% elif "series-2" in line.class %}
-    <rect class="chart-dot {{ line.class }}{% if dot.class %} {{ dot.class }}{% endif %}" x="{{ dot.x }}" y="{{ dot.y }}" width="{{ dot.width }}" height="{{ dot.height }}">{% if dot.title %}<title>{{ dot.title }}</title>{% endif %}</rect>
+    <polygon class="chart-dot {{ line.class }}{% if dot.class %} {{ dot.class }}{% endif %}" points="{{ dot.points }}" tabindex="0">{% if dot.title %}<title>{{ dot.title }}</title>{% endif %}</polygon>
+    {% elif "series-2" in line.class or "series-4" in line.class %}
+    <rect class="chart-dot {{ line.class }}{% if dot.class %} {{ dot.class }}{% endif %}" x="{{ dot.x }}" y="{{ dot.y }}" width="{{ dot.width }}" height="{{ dot.height }}" tabindex="0">{% if dot.title %}<title>{{ dot.title }}</title>{% endif %}</rect>
     {% else %}
-    <circle class="chart-dot {{ line.class }}{% if dot.class %} {{ dot.class }}{% endif %}" cx="{{ dot.x }}" cy="{{ dot.y }}" r="3">{% if dot.title %}<title>{{ dot.title }}</title>{% endif %}</circle>
+    <circle class="chart-dot {{ line.class }}{% if dot.class %} {{ dot.class }}{% endif %}" cx="{{ dot.x }}" cy="{{ dot.y }}" r="3" tabindex="0">{% if dot.title %}<title>{{ dot.title }}</title>{% endif %}</circle>
     {% endif %}
     {% endfor %}
     {% for mark in line.marks %}
-    <circle class="chart-dot {{ mark.class }} outlier" cx="{{ mark.x }}" cy="{{ mark.y }}" r="4">
+    <circle class="chart-dot {{ mark.class }} outlier" cx="{{ mark.x }}" cy="{{ mark.y }}" r="4" tabindex="0">
       <title>{{ mark.title }}</title>
     </circle>
     {% endfor %}
@@ -49,4 +44,5 @@
   </g>
   {% endif %}
   <line class="chart-axis" x1="{{ chart.left }}" y1="{{ chart.plot_bottom }}" x2="{{ chart.right_edge }}" y2="{{ chart.plot_bottom }}" aria-hidden="true"></line>
+  <g class="chart-tip" visibility="hidden" aria-hidden="true"><rect class="chart-tip-box" rx="4"></rect><text class="chart-tip-text"></text></g>
 </svg>

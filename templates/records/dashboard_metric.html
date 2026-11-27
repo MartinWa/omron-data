@@ -3,6 +3,8 @@
 {% block title %}{{ metric_label }} — Dashboards — omron-data{% endblock %}
 {% block scripts %}
 <script src="{% asset 'records/print.js' %}" defer></script>
+<script src="{% asset 'records/scroll.js' %}" defer></script>
+<script src="{% asset 'records/chart-tips.js' %}" defer></script>
 {% endblock %}
 {% block content %}
 <div class="page-head report-head">
@@ -14,6 +16,7 @@
   <p class="lede">One metric over time, its extremes and every reading behind them.</p>
   {% endif %}
 </div>
+{% include "partials/dashboard_nav.html" %}
 
 {% if not has_data %}
 <div class="empty">
@@ -24,22 +27,11 @@
 </div>
 {% else %}
 
-<div class="report-toolbar filters">
-  <div class="report-toolbar-range">
-    <span class="segmented" role="group" aria-label="Date range">
-      {% for option in range_options %}
-      <a class="segmented-item{% if option.current %} is-current{% endif %}" href="{% querystring range=option.key %}"{% if option.current %} aria-current="true"{% endif %}>{{ option.label }}</a>
-      {% endfor %}
-    </span>
-  </div>
-  <div class="filters-actions">
-    <button class="btn btn-sm" type="button" onclick="window.print()">Print</button>
-  </div>
-</div>
+{% include "partials/dashboard_toolbar.html" %}
 
 {% if range_empty %}
 <div class="notice report-notice">
-  <p>No {{ metric_label|lower }} readings in {{ period_label }}. <a href="{% querystring range='all' %}">Show all time</a></p>
+  <p>No {{ metric_label|lower }} readings in {{ period_label }}. <a href="{% querystring range='all' from=None to=None %}">Show all time</a></p>
 </div>
 {% else %}
 
@@ -51,6 +43,13 @@
   <div class="chart-wrap">
     {% include "partials/report_chart.html" with chart=chart %}
   </div>
+  {% if legend %}
+  <ul class="chart-legend">
+    {% for line in legend %}
+    <li><span class="legend-swatch {{ line.class }}"></span>{{ line.label }}</li>
+    {% endfor %}
+  </ul>
+  {% endif %}
   <details class="data-table" data-print-open>
     <summary>Show the numbers</summary>
     {% if hidden_rows %}
@@ -60,11 +59,11 @@
       <table class="table">
         <caption class="visually-hidden">{{ metric_label }} per reading for {{ period_label }}</caption>
         <thead>
-          <tr><th scope="col">Reading</th><th scope="col" class="num">Value</th><th scope="col">Note</th></tr>
+          <tr><th scope="col">Reading</th><th scope="col" class="num">Value</th>{% if metric == "body_weight" %}<th scope="col" class="num">7-day average</th>{% endif %}<th scope="col">Note</th></tr>
         </thead>
         <tbody>
           {% for row in rows %}
-          <tr><td>{{ row.date }}</td><td class="num">{{ row.value }}</td><td class="muted">{{ row.note|default:"—" }}</td></tr>
+          <tr><td>{{ row.date }}</td><td class="num">{{ row.value }}</td>{% if metric == "body_weight" %}<td class="num">{{ row.average }}</td>{% endif %}<td class="muted">{{ row.note|default:"—" }}</td></tr>
           {% endfor %}
         </tbody>
       </table>

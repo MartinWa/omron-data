@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+{% load assets formatting %}
+{% block title %}Blood pressure — Dashboards — omron-data{% endblock %}
+{% block scripts %}
+<script src="{% asset 'records/print.js' %}" defer></script>
+<script src="{% asset 'records/scroll.js' %}" defer></script>
+<script src="{% asset 'records/chart-tips.js' %}" defer></script>
+{% endblock %}
+{% block content %}
+<div class="page-head report-head">
+  <p class="report-back"><a href="{{ dashboards_url }}">← Dashboards</a></p>
+  <h1>Blood pressure</h1>
+  {% if has_data %}
+  <p class="lede">{{ period_label }} · {{ readings_total }} reading{{ readings_total|pluralize }}</p>
+  {% else %}
+  <p class="lede">Systolic, diastolic and pulse from your imported readings.</p>
+  {% endif %}
+</div>
+{% include "partials/dashboard_nav.html" %}
+
+{% if not has_data %}
+<div class="empty">
+  <svg class="empty-icon" width="38" height="38" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M2 12.5h4l2-4.5 3 9 2.5-6 1.5 1.5H22"/></svg>
+  <p>No readings yet.</p>
+  <p class="small">Import an OMRON connect CSV export to see blood pressure here.</p>
+  <a class="btn btn-primary" href="{% url 'imports' %}">Import a CSV export</a>
+</div>
+{% else %}
+
+{% include "partials/dashboard_toolbar.html" %}
+
+{% if range_empty %}
+<div class="notice report-notice">
+  <p>No blood pressure readings in {{ period_label }}. <a href="{% querystring range='all' from=None to=None %}">Show all time</a></p>
+</div>
+{% else %}
+
+<section class="card report-card">
+  <div class="card-head">
+    <h2>Blood pressure</h2>
+    {% if blood_pressure.latest %}
+    <span class="muted small">Latest {{ blood_pressure.latest }} · AHA category: <span class="{{ blood_pressure.category.class }}">{{ blood_pressure.category.text }}</span></span>
+    {% else %}
+    <span class="muted small">Systolic and diastolic</span>
+    {% endif %}
+  </div>
+  {% if blood_pressure.has_points %}
+  <div class="chart-wrap">
+    {% include "partials/report_chart.html" with chart=blood_pressure.chart %}
+  </div>
+  <ul class="chart-legend">
+    {% for line in blood_pressure.legend %}
+    <li><span class="legend-swatch {{ line.class }}"></span>{{ line.label }}{% if line.unit %} ({{ line.unit }}){% endif %}</li>
+    {% endfor %}
+  </ul>
+  <ul class="chart-legend" aria-label="Dot colours by AHA category">
+    {% for item in blood_pressure.category_legend %}
+    <li><span class="legend-swatch legend-dot {{ item.class }}"></span>{{ item.label }}</li>
+    {% endfor %}
+  </ul>
+  <p class="chart-note">Each dot is coloured by the AHA/ACC 2017 category of its reading, systolic 120–129 elevated, 130–139 stage 1, 140 and above stage 2, with the diastolic equivalents 80/90 mmHg. A home 7-day average of 135/85 mmHg or higher corresponds to an office reading of 140/90 mmHg.</p>
+  <div class="chart-wrap">
+    {% include "partials/report_chart.html" with chart=blood_pressure.pulse_chart %}
+  </div>
+  <ul class="chart-legend">
+    {% for line in blood_pressure.pulse_legend %}
+    <li><span class="legend-swatch {{ line.class }}"></span>{{ line.label }}{% if line.unit %} ({{ line.unit }}){% endif %}</li>
+    {% endfor %}
+  </ul>
+  <details class="data-table" data-print-open>
+    <summary>Show the numbers</summary>
+    {% if blood_pressure.rows_total > blood_pressure.rows|length %}
+    <p class="small muted">Showing the {{ blood_pressure.rows|length }} most recent of {{ blood_pressure.rows_total }} readings. <a href="{{ blood_pressure.rows_url }}">All blood-pressure readings</a></p>
+    {% endif %}
+    <div class="table-wrap">
+      <table class="table">
+        <caption class="visually-hidden">Systolic, diastolic and pulse per reading for {{ period_label }}</caption>
+        <thead>
+          <tr><th scope="col">Reading</th><th scope="col" class="num">Systolic</th><th scope="col" class="num">Diastolic</th><th scope="col" class="num">Pulse</th><th scope="col">Note</th></tr>
+        </thead>
+        <tbody>
+          {% for row in blood_pressure.rows %}
+          <tr><td>{{ row.date }}</td><td class="num">{{ row.systolic }}</td><td class="num">{{ row.diastolic }}</td><td class="num">{{ row.pulse }}</td><td class="muted">{{ row.note|default:"—" }}</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </details>
+  {% else %}
+  <p class="muted">No blood pressure readings in {{ period_label }}.</p>
+  {% endif %}
+</section>
+
+{% endif %}
+{% endif %}
+{% endblock %}

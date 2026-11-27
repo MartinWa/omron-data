@@ -110,9 +110,19 @@ page computes a coordinate, and no template does arithmetic.
 - `bar_chart(points, ...)` and `line_chart(lines, ...)` return the same frame: `kind`,
   `width`, `height`, `left`, `right`, `top`, `bottom`, `plot_bottom`, `plot_width`,
   `right_edge`, `ticks`, `xlabels`, `aria_label` and `empty`, plus `bars` for a bar chart.
-  A line chart's frame also carries `y_min`, `y_max` (the resolved domain), `max_gap`,
-  `bands` and `lines`; every line carries `label`, `class`, `segments`, `dots` and `marks`.
-  The frame is a 720 × 240 viewBox with three labelled y ticks.
+  A line chart's frame also carries `y_min`, `y_max` (the resolved domain), `max_gap` and
+  `lines`; every line carries `label`, `title`, `class`, `segments`, `dots` and `marks`.
+  `bar_chart` takes an optional `label_of(point)` to override the bucket labels in both the
+  bar `<title>`s and the x tick labels — the weekday chart uses it to label its seven bars
+  Mon–Sun. A single-point line is never dropped: its one-point segment is invisible, but the
+  lone dot still renders (a zero-point line is the only one skipped, so an empty series
+  never reaches the legend).
+  Both take an optional keyword `height=None`: the default frame is a 720 × 240 viewBox
+  (`CHART_HEIGHT`) with three labelled y ticks, and the dashboard card builders pass
+  `height=TALL_CHART_HEIGHT` (380) so every chart on a dedicated dashboards page renders a
+  720 × 380 viewBox — except the readings-per-weekday chart, which keeps the default frame —
+  and the returned `height` is the value actually used, and the SVG scales
+  responsively (`width: 100%; height: auto`, so no CSS caps it).
 - **Units are raw in Python and spaced once in the template layer.** `bar_chart` and
   `line_chart` take the raw unit (`"kg"`, `"%"`, `"mmHg"`), `_tick_label` appends it through
   the `axis_unit` filter in `records/templatetags/formatting.py` — `%` stays tight, every
@@ -128,54 +138,164 @@ page computes a coordinate, and no template does arithmetic.
   steps, so the three ticks land at `y_min`, the middle and `y_max`, all multiples of the
   step. A truncated line axis is legitimate when the story is change over time, so both end
   ticks stay on the chart and the numbers stay behind *Show the numbers*; a flat series gets
-  a span of `max(abs(value) * 0.1, 1.0)` so the domain never degenerates.
-- **Segments, dots, marks and bands.** A line splits into `segments` wherever consecutive x
-  differ by more than `max_gap` (x is days from the range start) or a y is `None`; a
-  single-point segment still produces a dot. `dots_all` on a line draws a dot per point, and
-  the dot's shape follows the series index — `series-1` a circle, `series-2` a rect,
-  `series-3` a polygon — so colour-vision-deficient readers can tell the series apart by shape
-  as well as hue, and the line styles differ by dash pattern (`series-2` dashed, `series-3`
-  dotted, an `avg` line dashed thinner). A line may carry `marks` — outlier readings —
-  rendered as `chart-dot … outlier` circles with a `<title>`, and `latest_title` emphasises
-  the last dot as `dot-latest`. `bands` is a list of `{"from", "to", "label", "class"}`
-  (`to=None` means to the domain top); each is clamped to the domain and projected to
-  `{"y", "height", "class", "label"}` and emitted in `chart["bands"]`, which the partial
-  renders *before* the lines. The blood-pressure bands are data in
-  `records/models.py` (`REFERENCE_BANDS`), never hex in Python.
+  a span of `max(abs(value) * 0.1, 1.0)` so the domain never degenerates. For units whose
+  `UNIT_PRECISION` is 0 (`mmHg`, `/min`, `kcal`, `ohm`) `line_chart` calls
+  `nice_domain(lo, hi, integer=True)`, which skips the fractional 2.5×10⁰ step candidate in
+  `nice_step`, so the y ticks are whole numbers.
+- **Segments, dots, marks and per-point tones.** A line splits into `segments` wherever
+  consecutive x differ by more than `max_gap` (x is days from the range start) or a y is
+  `None`; a single-point segment still produces a dot. `dots_all` on a line draws a dot per
+  point, and the dot's shape follows the series class — `series-1` a circle, `series-2` and
+  `series-4` a rect, `series-3` a polygon — so colour-vision-deficient readers can tell the
+  series apart by shape as well as hue, and the line styles differ by dash pattern
+  (`series-2` and `series-4` dashed, `series-3` dotted, an `avg` line stroked in its own
+  `--avg-line` slate colour, dashed `10 6`, thinner at 0.85 opacity, with a matching
+  `.legend-swatch.avg`, so it stays distinct from every series colour at small widths). A point
+  may also be a 3-tuple `(x, y, tone)`, and the tone becomes the dot's extra class —
+  `cat-ok`/`cat-warn`/`cat-danger` for the blood-pressure AHA categories — combined with
+  `dot-latest` on the emphasised last dot; a 4-tuple `(x, y, tone, title)` also carries a
+  human label per point, which becomes that dot's `<title>` (for example
+  `25 Nov 2026 08:00 — Systolic 141 mmHg`). Every drawn line carries its label as `title`,
+  rendered as a `<title>` inside each `<polyline>`, so hovering the line names the series, and
+  every dot and mark gets `tabindex="0"` so keyboard users can focus it and read the same
+  title. A line may carry `marks` — outlier readings —
+  rendered as `chart-dot … outlier` circles with a `<title>`. The blood-pressure category
+  thresholds are data in `records/models.py` (`REFERENCE_BANDS`), never hex in Python, and each
+  band also carries a `tone` class (`cat-elevated` / `cat-stage1` / `cat-danger`, with `cat-ok`
+  below 120) that `_reference_tone`, `_diastolic_tone` and the category legend use for the dot
+  and legend-swatch fills, so all four AHA categories are visually distinct; dots get a thin
+  surface-coloured halo stroke so the fill reads clearly. The
+  y domain derives from the data (and any explicit `y_min`/`y_max`) alone, so colouring a
+  point never moves the axis.
 - Geometry is pure Python and stays finite: coordinates are rounded to two decimals, and a
   non-finite or missing value plots as `0` rather than `nan`.
-- A bucket that only partly overlaps the range is flagged in the dict (`partial`,
-  `in_progress`) together with a note, and the partial renders it as `bar-partial`; the note
-  becomes the bar's `<title>`, which is how a partial period is explained without a legend.
+- A bucket that only partly overlaps the range carries a note in the dict, but only the
+  bucket that contains the range end and is still in progress (`end == today`,
+  `partial`/`in_progress`) renders as `bar-partial`; a bucket truncated by the range start
+  keeps its `partial <bucket>, N of M days` note in the bar's `<title>` and table row yet
+  renders solid. The note becomes the bar's `<title>`, which is how a partial period is
+  explained without a legend.
 - **Tick labels omit the year** unless the range crosses a year boundary and the tick lands in
   January (`multi_year` on `_day_ticks` and `_tick_bucket_label`); full dates with the year
-  stay in tooltips and tables.
+  stay in tooltips and tables. X tick labels anchor `start` on the first tick and `end` on the
+  last (`middle` in between), so the edge labels never clip outside the card.
 - **Colours come from CSS only.** Neither the Python nor the partial writes a colour: the
   only paint attribute is `fill="none"` on a polyline. The partial emits classes
-  (`chart-bar`, `bar-partial`, `chart-band band-warn`/`band-danger`, `chart-line`,
-  `series-1` to `series-3`, `avg`, `chart-dot`, `outlier`, `dot-latest`) and the palette
-  lives in `records/static/records/app.css`, so both themes and the print stylesheet get a
+  (`chart-bar`, `bar-partial`, `chart-line`, `series-1` to `series-4`, `avg`, `chart-dot`,
+  `outlier`, `dot-latest`, and the category tones `cat-ok`/`cat-warn`/`cat-danger` on dots
+  and `legend-swatch`es) and the palette lives in `records/static/records/app.css` — one
+  variable per series (`--accent`, `--success`, `--warning`, `--series-alt`, plus `--danger`
+  for the tones) declared for the light, both dark and the print palettes, each keeping at
+  least 3:1 contrast on the card surface — so both themes and the print stylesheet get a
   readable chart for free.
-- The SVG carries `role="img"`, a non-empty `aria-label` and a `<title>` per bar, band, dot
-  and mark, so a screen reader and a printed page get the numbers even without hover.
+- The SVG carries `role="img"`, a non-empty `aria-label` and a `<title>` per bar, line, dot
+  and mark, so a screen reader and a printed page get the numbers even without hover. Each
+  SVG also ends with a hidden `.chart-tip` group (a rect and a text); `records/chart-tips.js`,
+  loaded via `{% block scripts %}` on all five dashboard templates, listens for
+  `mouseover`/`focusin` on `.chart-dot`, `.chart-bar` and `.chart-line`, shows the tip above the
+  shape with its child `<title>` text clamped inside the viewBox (flipping below near the top),
+  and hides it again on `mouseout`/`focusout` — the native `<title>` stays as the fallback. The
+  line chart renders all polylines in a `<g class="chart-lines">` first and every dot and mark in
+  a separate `<g class="chart-dots">` after it, with `pointer-events: all` on `.chart-dot`, so at
+  line crossings the dots always win pointer events over the strokes and the tooltip fires on
+  the dot, not the line.
 - The card builders (`_blood_pressure_card`, `_weight_card`, `_composition_card`,
-  `_consistency_card`, `_weekly_card`, `_extremes_card`) sit on top of those two functions
+  `_consistency_card`, `_weekly_card`, `_weekday_card`, `_extremes_card`) sit on top of those
+  two functions. `_rolling_average(points)` averages, for every reading day, the trailing
+  7-day window of available points, so an `avg` line starts at the first reading and only
+  breaks where `max_gap` splits it. `_consistency_card` grids the resolved range
+  (`resolved["start"]` to `resolved["end"]`), so the range pills and a custom window reshape
+  the heatmap; `HEATMAP_DAYS` remains only as the lower bound in `_fetch_window`, so the DB
+  fetch always covers the whole resolved range, including `all` (where `start` is the
+  earliest reading). The consistency page stacks the heatmap card
+  (`_consistency_card`, full width like the blood-pressure and weight pages, with a heading
+  row above the grid labeling week columns by their week-start date, thinned to every
+  `step`-th column (`step = max(1, ceil(columns / 8))`, forced to at least 2 on grids of six
+  columns or fewer, so labels never sit on adjacent columns), and the grid stretches to the
+  card width — each week is a `.heatmap-col` flex column (`flex: 1 1 14px; min-width: 14px`)
+  of square `.heatmap-grid .heat-cell`s (`aspect-ratio: 1`), so cells grow with the card up to a
+  26px `max-width` and the grid centers itself (`justify-content: safe center`) when narrower,
+  while the whole grid scrolls horizontally in `.heatmap-scroll` once the range is too long for
+  the 14px minimum, with the `.heatmap-weeks` heading row stretching the same way and Mon–Sun
+  labels on the left) above a `.report-grid` holding the
+  `_weekly_card` and `_weekday_card` side by side, both on the tall 380 frame.
+  `_composition_card` draws the two percentage metrics in `COMBINED_COMPOSITION` (body fat
+  and skeletal muscle) together on one shared percent axis when the selected metric is one
+  of them — a `series-1` and a `series-4` line, so colour, dash pattern and dot shape all
+  differ, each followed by its `_rolling_average()` line (`series-1 avg` / `series-4 avg`,
+  dashed thinner, named in the legend) — and a single line for any other metric plus its own
+  `series-2 avg` 7-day-average line
   and return the card's `chart` dict plus its `rows` for the table behind *Show the numbers*,
   capped at `CARD_ROW_LIMIT` most recent rows with a `rows_total` and a `rows_url` for the
-  full list. `build_dashboards(owner, params, today)` and
-  `build_metric_dashboard(owner, metric, params, today)` assemble the whole page context
-  without a request object, so a page test and a shell check can call them directly.
+  full list. `_dashboard_scaffold(owner, params, today, active)` builds the shared page
+  context — `parse_dashboard_params` reads `range`, `metric` and the ISO dates `from`/`to`
+  (invalid ones become `None`); `resolve_range` resolves them: `custom` uses `from`/`to` as
+  the window, clamps the end to today, falls back to `DEFAULT_RANGE` when they are missing,
+  invalid or reversed, and gives the KPI delta the equal-length window immediately before
+  `from`; `RANGE_DAYS` drives the day-based keys and `RANGE_VERSUS` words the KPI
+  "previous …" comparisons; the range options (`RANGE_KEYS`, `7d` first, `custom` last) come
+  with `custom_from`/`custom_to`/`query_metric` for the shared toolbar partial
+  (`templates/partials/dashboard_toolbar.html`, included by all five dashboard templates:
+  the range pills, where Custom is a `popovertarget` button that opens the
+  `custom-range-popover` popover — a GET form with the hidden `range=custom` (plus `metric`
+  when the query carries one), the two date inputs and the Apply button laid out in one row —
+  opened at the full width of the toolbar bar and aligned under it (the toolbar carries
+  `anchor-name: --dash-toolbar` and the popover anchors to it with `top: anchor(bottom)` and
+  `left: anchor(left)` plus `inline-size: anchor-size(inline)`, so the explicit width makes
+  it stretch exactly to the bar width while staying aligned under its left edge, with an
+  absolute-positioned full-width fallback). The popover is elevated with a layered
+  `box-shadow: var(--shadow), var(--shadow-pop)` — `--shadow-pop` is a stronger shadow in the
+  light and both dark palettes and `none` in print — and while it is open the Custom button
+  takes the `.is-current` look via
+  `body:has(#custom-range-popover:popover-open) button[popovertarget="custom-range-popover"]`,
+  with `scroll.js` syncing the button's `aria-expanded` from the popover's `toggle` event. At
+  `max-width: 640px` the toolbar keeps a single row: the pills container scrolls horizontally
+  (`flex-wrap: nowrap` on the toolbar and the `.segmented`, `overflow-x: auto` with a hidden
+  scrollbar and `scroll-snap-type: x proximity` on `.report-toolbar-range`) and *Print* stays
+  right-aligned and unshrunk, so the page never overflows horizontally; the
+  composition switcher (`COMPOSITION_SWITCHER`: one *Body fat & muscle* pill for the
+  `COMBINED_COMPOSITION` pair, marked current for either of its two `?metric=` values, plus
+  the three single-metric pills), the
+  `dashboard_nav` sub-navigation (whose links keep `range` and
+  `metric` — and, for a custom range, `from`/`to` — via `filtered_url` and `_range_query`),
+  the back link and the window bookkeeping. Each of the five dashboard templates loads
+  `records/print.js` and `records/scroll.js` in its `{% block scripts %}`; `scroll.js` stores
+  `window.scrollY` under `omron-scroll:<pathname>` in `sessionStorage` when a link to the same
+  path is clicked and restores it on `DOMContentLoaded`/`pageshow`, so switching range pills
+  or composition pills does not jump back to the top — and
+  `build_dashboards(owner, params, today)` (overview: KPIs, section summary cards,
+  extremes), `build_dashboard_weight(...)` (weight + composition cards),
+  `build_dashboard_consistency(...)` (heatmap + weekly + weekday cards) and
+  `build_metric_dashboard(owner, metric, params, today)` (drill-down; `metric == PANEL` is
+  special-cased to the blood-pressure panel page, and `body_weight` gets a second,
+  `series-2 avg` 7-day-average line with a legend and an `average` column) assemble the whole
+  page context without a request object, so a page test and a shell check can call them
+  directly.
 
 `tests/test_reports.py` renders the partial with `render_to_string` and asserts the key set,
 the finite coordinates, the domain rules (a 131–132 kg series stays inside 126–136, a flat
-series keeps its height, a single point still draws a dot, gap splitting, band clamping), and
-that no `nan`, `inf` or `None` reaches the markup. `tests/test_dashboards.py` covers the page:
-the range chips and their default, the six KPI numbers and their units, the two blood-pressure
-panels with the reference bands and the latest category, the weight line with its 7-day
-average, one metric at a time in the composition card with its domain, the table caps, the
-heatmap grid and its hidden summary, every SVG carrying a role and a label, that no markup
-carries a literal colour, a `#hex` or a raw float, that the drill-down is a 404 for an unknown
-metric, and that the page stays under forty queries.
+series keeps its height, a single point still draws a dot, a high point gets a data-only
+axis, gap splitting, per-point dot tones), the custom-range parsing and resolution (valid,
+clamped, reversed and invalid `from`/`to`), and that no `nan`, `inf` or
+`None` reaches the markup. `tests/test_dashboards.py` covers the pages: the sub-navigation
+and its active item on every page, the range chips, their default and the Custom button with
+its popover date form on all five pages, the six KPI numbers
+and their units, the blood-pressure page with its two panels, category-coloured dots, the
+category legend and the latest category, the weight page and the weight drill-down with the
+7-day average
+line and column, the composition card with its combined body-fat and skeletal-muscle chart
+and its per-series 7-day average lines (or one other metric at a time, with its own average
+line) and its domain, the hover `<title>`s on every dot, line and bar plus the dots'
+`tabindex="0"`, the scroll script loaded on all five dashboard pages, the table
+caps, the full-width heatmap card with its thinned week headings and the side-by-side
+weekly and weekday bar cards on the consistency page (also for a custom
+window), the heatmap reshaping with the selected range, the heatmap's hidden summary, the rolling average starting at the first reading day, a single-point line
+rendering its lone dot, every SVG carrying a
+role and a label, that no markup carries a literal colour, a `#hex` or a raw float, that the
+drill-down is a 404 for an unknown metric, and that the page stays under forty queries.
+`tests/test_shell.py` checks the category-dot contrast (≥ 3:1 on the card surface) and the
+chart-series contrast (≥ 3:1 on the card surface) in the light, both dark and the print
+palettes, alongside the base template and navigation.
 
 ## The opt-in parity check
 
@@ -221,7 +341,7 @@ alone.
 | `test_ledger.py` | The import ledger and what the command line reports per file and in total |
 | `test_readings_page.py` | The readings page: filters, event grouping, badges, paging, the empty states |
 | `test_reports.py` | Chart geometry and the SVG partial |
-| `test_dashboards.py` | The dashboards page: range chips, KPIs, each card, the heatmap, the drill-down, print |
+| `test_dashboards.py` | The dashboards pages: sub-navigation, range chips, KPIs, the section pages, the blood-pressure page, the weight drill-down, the heatmap, print |
 | `test_tokens_page.py` | Creating, revoking, expiring and deleting a token, and what is stored |
 | `test_admin.py` | The read-only admin for measurements, runs and tokens |
 | `test_api_auth.py` | Bearer tokens, revoked and expired tokens, deactivated owners, shared prefixes |

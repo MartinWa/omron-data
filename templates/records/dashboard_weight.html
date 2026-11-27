@@ -1,0 +1,143 @@
+{% extends "base.html" %}
+{% load assets formatting %}
+{% block title %}Weight &amp; composition — Dashboards — omron-data{% endblock %}
+{% block scripts %}
+<script src="{% asset 'records/print.js' %}" defer></script>
+<script src="{% asset 'records/scroll.js' %}" defer></script>
+<script src="{% asset 'records/chart-tips.js' %}" defer></script>
+{% endblock %}
+{% block content %}
+<div class="page-head report-head">
+  <p class="report-back"><a href="{{ dashboards_url }}">← Dashboards</a></p>
+  <h1>Weight &amp; composition</h1>
+  {% if has_data %}
+  <p class="lede">{{ period_label }} · {{ readings_total }} reading{{ readings_total|pluralize }}{% if last_reading_days is not None %} · last reading {% if last_reading_days == 0 %}today{% else %}{{ last_reading_days }} day{{ last_reading_days|pluralize }} ago{% endif %}{% endif %}</p>
+  {% else %}
+  <p class="lede">Daily weigh-ins, body fat and skeletal muscle on one chart, and the other composition metrics one at a time.</p>
+  {% endif %}
+</div>
+{% include "partials/dashboard_nav.html" %}
+
+{% if not has_data %}
+<div class="empty">
+  <svg class="empty-icon" width="38" height="38" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M2 12.5h4l2-4.5 3 9 2.5-6 1.5 1.5H22"/></svg>
+  <p>No readings yet.</p>
+  <p class="small">Import an OMRON connect CSV export to see weight and composition here.</p>
+  <a class="btn btn-primary" href="{% url 'imports' %}">Import a CSV export</a>
+</div>
+{% else %}
+
+{% include "partials/dashboard_toolbar.html" %}
+
+{% if range_empty %}
+<div class="notice report-notice">
+  <p>No readings in {{ period_label }}. <a href="{% querystring range='all' from=None to=None %}">Show all time</a></p>
+</div>
+{% else %}
+
+<section class="card report-card">
+  <div class="card-head">
+    <h2>Weight</h2>
+    <span class="muted small">Daily readings</span>
+  </div>
+  {% if weight.has_points %}
+  <div class="chart-wrap">
+    {% include "partials/report_chart.html" with chart=weight.chart %}
+  </div>
+  <ul class="chart-legend">
+    {% for line in weight.legend %}
+    <li><span class="legend-swatch {{ line.class }}"></span>{{ line.label }}{% if line.unit %} ({{ line.unit }}){% endif %}</li>
+    {% endfor %}
+  </ul>
+  {% if weight.has_average %}
+  <p class="chart-note">Line: 7-day rolling average. The line breaks across gaps longer than 7 days.</p>
+  {% endif %}
+  <details class="data-table" data-print-open>
+    <summary>Show the numbers</summary>
+    {% if weight.rows_total > weight.rows|length %}
+    <p class="small muted">Showing the {{ weight.rows|length }} most recent of {{ weight.rows_total }} readings. <a href="{{ weight.rows_url }}">All weight readings</a></p>
+    {% endif %}
+    <div class="table-wrap">
+      <table class="table">
+        <caption class="visually-hidden">Daily weight and 7-day average for {{ period_label }}</caption>
+        <thead>
+          <tr><th scope="col">Reading</th><th scope="col" class="num">Weight</th><th scope="col" class="num">7-day average</th><th scope="col">Note</th></tr>
+        </thead>
+        <tbody>
+          {% for row in weight.rows %}
+          <tr><td>{{ row.date }}</td><td class="num">{{ row.value }}</td><td class="num">{{ row.average }}</td><td class="muted">{{ row.note|default:"—" }}</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </details>
+  {% else %}
+  <p class="muted">No weight readings in {{ period_label }}.</p>
+  {% endif %}
+</section>
+
+<section class="card report-card">
+  <div class="card-head">
+    <h2>Body composition</h2>
+    <span class="segmented segmented-sm" role="group" aria-label="Body composition metric">
+      {% for option in metric_options %}
+      <a class="segmented-item{% if option.current %} is-current{% endif %}" href="{% querystring metric=option.key %}"{% if option.current %} aria-current="true"{% endif %}>{{ option.label }}</a>
+      {% endfor %}
+    </span>
+  </div>
+  {% if composition.has_points %}
+  <div class="chart-wrap">
+    {% include "partials/report_chart.html" with chart=composition.chart %}
+  </div>
+  {% if composition.legend %}
+  <ul class="chart-legend">
+    {% for line in composition.legend %}
+    <li><span class="legend-swatch {{ line.class }}"></span>{{ line.label }}{% if line.unit %} ({{ line.unit }}){% endif %}</li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+  <p class="chart-note">{{ composition.note }}</p>
+  {% if composition.links %}
+  <p class="chart-note">{% for link in composition.links %}<a href="{{ link.url }}">{{ link.label }}</a>{% if not forloop.last %} · {% endif %}{% endfor %}</p>
+  {% endif %}
+  <details class="data-table" data-print-open>
+    <summary>Show the numbers</summary>
+    {% if composition.rows_total > composition.rows|length %}
+    <p class="small muted">Showing the {{ composition.rows|length }} most recent of {{ composition.rows_total }} readings. <a href="{{ composition.rows_url }}">All {{ composition.label|lower }} readings</a></p>
+    {% endif %}
+    <div class="table-wrap">
+      {% if composition.combined %}
+      <table class="table">
+        <caption class="visually-hidden">Body fat and skeletal muscle per reading for {{ period_label }}</caption>
+        <thead>
+          <tr><th scope="col">Reading</th><th scope="col" class="num">Body fat (%)</th><th scope="col" class="num">Skeletal muscle (%)</th><th scope="col">Note</th></tr>
+        </thead>
+        <tbody>
+          {% for row in composition.rows %}
+          <tr><td>{{ row.date }}</td><td class="num">{{ row.body_fat_pct }}</td><td class="num">{{ row.skeletal_muscle_pct }}</td><td class="muted">{{ row.note|default:"—" }}</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+      <table class="table">
+        <caption class="visually-hidden">{{ composition.label }} per reading for {{ period_label }}</caption>
+        <thead>
+          <tr><th scope="col">Reading</th><th scope="col" class="num">{{ composition.label }} ({{ composition.unit|axis_unit|default:"no unit" }})</th><th scope="col">Note</th></tr>
+        </thead>
+        <tbody>
+          {% for row in composition.rows %}
+          <tr><td>{{ row.date }}</td><td class="num">{{ row.value }}</td><td class="muted">{{ row.note|default:"—" }}</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% endif %}
+    </div>
+  </details>
+  {% else %}
+  <p class="muted">No {{ composition.label|lower }} readings in {{ period_label }}.</p>
+  {% endif %}
+</section>
+
+{% endif %}
+{% endif %}
+{% endblock %}
