@@ -222,7 +222,6 @@ def test_the_workflow_creates_the_release_for_the_tag_it_published():
     check = step(text, CHECK_STEP)
 
     assert "run: python3 tools/publish_release.py --check" in check
-    assert "TAG_CREATED: ${{ github.event.created }}" in check
     assert "run: python3 tools/publish_release.py\n" in step(text, RELEASE_STEP)
     assert text.index(CHECK_STEP) < text.index(RELEASE_STEP)
     assert text.find("- name:", text.index(RELEASE_STEP)) == -1
@@ -230,3 +229,11 @@ def test_the_workflow_creates_the_release_for_the_tag_it_published():
     assert "contents: write" in text
     assert "actions: read" in text
     assert "fetch-depth: 0" in text
+
+
+def test_the_release_script_inherits_the_tag_created_flag_from_the_job():
+    text = workflow()
+    job_environment = text[text.index("\n    env:") : text.index("\n    steps:")]
+
+    assert "TAG_CREATED: ${{ github.event.created }}" in job_environment
+    assert text.count("python3 tools/publish_release.py") == 2
