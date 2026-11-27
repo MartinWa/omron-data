@@ -18,10 +18,13 @@ env:
 jobs:
   publish:
     name: Publish the release image
+    # A tag deletion reaches this workflow but has no image or release to publish.
+    if: ${{ !github.event.deleted }}
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     permissions:
-      contents: read # Tags only: the version comes from the tag and no release is written.
+      contents: write # Create the GitHub Release for the tested tag.
+      actions: read # Verify the successful CI jobs of the release commit.
       packages: write # Push the image, its index and the attestations to GHCR.
       id-token: write # Sign the provenance and SBOM attestations.
       attestations: write # Store the attestations for the published image.
@@ -33,16 +36,15 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.sha }}
+          fetch-depth: 0
           persist-credentials: false
-      - name: Read the version from the tag
-        id: version
-        run: |
-          if [[ ! "$RELEASE_TAG" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "::error::The tag '$RELEASE_TAG' is not a release version of the form 1.2.3."
-            exit 1
-          fi
-          printf 'version=%s\n' "$RELEASE_TAG" >> "$GITHUB_OUTPUT"
-          printf 'Releasing version %s from %s\n' "$RELEASE_TAG" "$GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"
+      - name: Require a stable tag on a tested main commit
+        id: release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_CREATED: ${{ github.event.created }}
+        run: python3 tools/publish_release.py --check
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
       - name: Enable arm64 emulation
@@ -63,7 +65,7 @@ jobs:
         id: existing
         env:
           GH_TOKEN: ${{ github.token }}
-          VERSION: ${{ steps.version.outputs.version }}
+          VERSION: ${{ steps.release.outputs.version }}
         run: |
           owner=${GITHUB_REPOSITORY%/*}
           package=${GITHUB_REPOSITORY#*/}
@@ -119,11 +121,11 @@ jobs:
           provenance: false
           outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
           build-args: |
-            OMRON_VERSION=${{ steps.version.outputs.version }}
+            OMRON_VERSION=${{ steps.release.outputs.version }}
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
-            org.opencontainers.image.version=${{ steps.version.outputs.version }}
+            org.opencontainers.image.version=${{ steps.release.outputs.version }}
           cache-from: type=gha,scope=ci-production
           github-token: ""
       - name: Build the arm64 image by digest
@@ -137,11 +139,11 @@ jobs:
           provenance: false
           outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
           build-args: |
-            OMRON_VERSION=${{ steps.version.outputs.version }}
+            OMRON_VERSION=${{ steps.release.outputs.version }}
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
-            org.opencontainers.image.version=${{ steps.version.outputs.version }}
+            org.opencontainers.image.version=${{ steps.release.outputs.version }}
           cache-from: type=gha,scope=ci-production
           github-token: ""
       - name: Check the amd64 image and generate its SBOM
@@ -168,7 +170,7 @@ jobs:
         id: candidate
         if: steps.existing.outputs.published != 'true'
         env:
-          VERSION: ${{ steps.version.outputs.version }}
+          VERSION: ${{ steps.release.outputs.version }}
           AMD64: ${{ steps.amd64.outputs.digest }}
           ARM64: ${{ steps.arm64.outputs.digest }}
         run: |
@@ -243,7 +245,7 @@ jobs:
         id: push
         if: steps.existing.outputs.published != 'true'
         env:
-          VERSION: ${{ steps.version.outputs.version }}
+          VERSION: ${{ steps.release.outputs.version }}
           DIGEST: ${{ steps.candidate.outputs.digest }}
         run: |
           docker buildx imagetools create \
@@ -291,3 +293,11 @@ jobs:
           done
           echo "::error::ghcr.io/${GITHUB_REPOSITORY,,} is not pullable without credentials. Set the package visibility to public once in its settings so this job can keep it in step with the repository."
           exit 1
+      - name: Create or publish the GitHub Release
+        id: github-release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        # GITHUB_TOKEN does not trigger another release workflow, so the image
+        # published above and the release written here cannot disagree.
+        run: python3 tools/publish_release.py

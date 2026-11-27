@@ -47,7 +47,13 @@ Three more worth running before a pull request or a release, all runnable the sa
 ## Releasing
 
 A release is an annotated `X.Y.Z` tag on `main` with a clean working tree; pushing the tag
-triggers `.github/workflows/release.yml`, which builds, attests and publishes the image.
+triggers `.github/workflows/release.yml`, which builds, attests and publishes the image and
+then creates the GitHub Release for that tag with GitHub generated notes, which is what the
+release badge in `README.md` resolves against. The run refuses a tag whose commit has no
+successful CI push run on `main` and a tag that is not new, such as a moved or reused one,
+and it skips a tag deletion, so only a tested commit can carry a release and re-running the
+workflow finishes a release whose image is already published.
+
 `tools/tag_release.ps1` creates the tag on a clean `main`, bumping the patch version of the
 latest stable tag unless `-Version X.Y.Z` is given, and `-Push` pushes it:
 

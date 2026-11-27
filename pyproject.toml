@@ -35,6 +35,7 @@ select = ["E", "F", "I", "B", "UP", "SIM", "S"]
 "tests/*.py" = ["S101", "E501"]
 "tests/settings.py" = ["E402", "F403", "S105"]
 "omron_data/settings.py" = ["S105"]
+"tools/publish_release.py" = ["S603", "S607"]
 
 [tool.pytest.ini_options]
 DJANGO_SETTINGS_MODULE = "tests.settings"
