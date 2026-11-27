@@ -47,10 +47,7 @@ def _sqlite_file_problem(name) -> str | None:
         with closing(sqlite3.connect(uri, uri=True)) as probe:
             probe.execute("SELECT 1")
             try:
-                applied = {
-                    f"{app}.{migration}"
-                    for app, migration in probe.execute("SELECT app, name FROM django_migrations")
-                }
+                applied = set(probe.execute("SELECT app, name FROM django_migrations"))
             except sqlite3.OperationalError as error:
                 if "no such table" not in str(error):
                     raise
@@ -59,12 +56,8 @@ def _sqlite_file_problem(name) -> str | None:
         logger.exception("Readiness check failed")
         return "database probe raised"
     loader = MigrationLoader(None)
-    pending = [
-        f"{app}.{migration}"
-        for app, migration in loader.graph.leaf_nodes()
-        if f"{app}.{migration}" not in applied
-    ]
-    return _pending_problem(pending)
+    pending = loader.graph.nodes.keys() - applied
+    return _pending_problem([f"{app}.{migration}" for app, migration in sorted(pending)])
 
 
 def _connection_problem() -> str | None:

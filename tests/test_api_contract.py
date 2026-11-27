@@ -170,6 +170,45 @@ def test_readyz_answers_without_a_token_when_the_database_is_migrated(db):
     assert ENVELOPE.issubset(body)
 
 
+def test_readyz_rejects_a_missing_prerequisite_in_a_sqlite_file(
+    transactional_db, monkeypatch, tmp_path, caplog
+):
+    import sqlite3
+    from contextlib import closing
+    from types import SimpleNamespace
+
+    from django.db import connection
+
+    import records.routers.meta as meta
+
+    path = tmp_path / "readiness.sqlite3"
+    file_connection = SimpleNamespace(
+        settings_dict={"ENGINE": "django.db.backends.sqlite3", "NAME": path},
+        is_in_memory_db=lambda: False,
+    )
+    monkeypatch.setattr(meta, "connection", file_connection)
+
+    client = Client()
+    connection.ensure_connection()
+    with closing(sqlite3.connect(path, autocommit=True)) as snapshot:
+        connection.connection.backup(snapshot)
+        assert client.get("/api/v1/readyz").status_code == 200
+
+        removed = snapshot.execute(
+            "DELETE FROM django_migrations WHERE app = ? AND name = ?",
+            ("records", "0001_initial"),
+        )
+        assert removed.rowcount == 1
+
+    response = client.get("/api/v1/readyz")
+
+    assert response.status_code == 503
+    assert response.json()["error"]["code"] == "service_unavailable"
+    assert "records.0001_initial" in caplog.text
+    assert "records.0001_initial" not in response.content.decode()
+    assert client.get("/api/v1/healthz").status_code == 200
+
+
 def test_readyz_answers_503_with_the_envelope_when_migrations_are_pending(db, monkeypatch, caplog):
     import logging
     from types import SimpleNamespace
