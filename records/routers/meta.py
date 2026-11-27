@@ -42,7 +42,7 @@ def _pending_problem(pending: list[str]) -> str | None:
 
 
 def _sqlite_file_problem(name) -> str | None:
-    uri = f"file:{Path(name).as_posix()}?mode=rw"
+    uri = Path(name).absolute().as_uri() + "?mode=rw"
     try:
         with closing(sqlite3.connect(uri, uri=True)) as probe:
             probe.execute("SELECT 1")
@@ -51,7 +51,9 @@ def _sqlite_file_problem(name) -> str | None:
                     f"{app}.{migration}"
                     for app, migration in probe.execute("SELECT app, name FROM django_migrations")
                 }
-            except sqlite3.OperationalError:
+            except sqlite3.OperationalError as error:
+                if "no such table" not in str(error):
+                    raise
                 applied = set()
     except sqlite3.Error:
         logger.exception("Readiness check failed")

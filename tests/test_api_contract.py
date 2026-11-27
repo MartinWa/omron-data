@@ -275,6 +275,74 @@ def test_readyz_treats_an_empty_database_file_as_pending_without_writing_to_it(
     assert empty.stat().st_size == 0
 
 
+def test_readyz_uri_encodes_special_characters_in_the_database_path(db, monkeypatch, tmp_path):
+    import records.routers.meta as meta
+
+    weird = tmp_path / "omron#backup?x.sqlite3"
+
+    class WeirdConnection:
+        settings_dict = {"NAME": str(weird), "ENGINE": "django.db.backends.sqlite3"}
+
+        def is_in_memory_db(self):
+            return False
+
+    monkeypatch.setattr(meta, "connection", WeirdConnection())
+
+    response = Client().get("/api/v1/readyz")
+
+    assert response.status_code == 503
+    assert response.json()["error"]["message"] == "Service temporarily unavailable"
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_readyz_logs_the_real_cause_when_the_migration_read_fails(
+    db, monkeypatch, tmp_path, caplog
+):
+    import logging
+    import sqlite3
+    from types import SimpleNamespace
+
+    import records.routers.meta as meta
+
+    target = tmp_path / "locked.sqlite3"
+    target.touch()
+
+    class LockedProbe:
+        def execute(self, sql):
+            if "django_migrations" in sql:
+                raise sqlite3.OperationalError("database is locked")
+            return []
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(
+        meta,
+        "sqlite3",
+        SimpleNamespace(
+            connect=lambda *args, **kwargs: LockedProbe(),
+            Error=sqlite3.Error,
+            OperationalError=sqlite3.OperationalError,
+        ),
+    )
+
+    class FileConnection:
+        settings_dict = {"NAME": str(target), "ENGINE": "django.db.backends.sqlite3"}
+
+        def is_in_memory_db(self):
+            return False
+
+    monkeypatch.setattr(meta, "connection", FileConnection())
+
+    with caplog.at_level(logging.ERROR, logger="django"):
+        response = Client().get("/api/v1/readyz")
+
+    assert response.status_code == 503
+    assert response.json()["error"]["message"] == "Service temporarily unavailable"
+    assert "database is locked" in caplog.text
+    assert "pending" not in caplog.text
+
+
 def test_metrics_matches_the_registry_with_units_and_kinds(auth):
     body = auth.get("/api/v1/metrics").json()
 

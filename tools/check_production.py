@@ -57,7 +57,7 @@ def check_database(settings) -> list[str]:
     except OSError as error:
         return [f"{path.parent} is not writable: {error}"]
     try:
-        with sqlite3.connect(f"file:{path.as_posix()}?mode=rw", uri=True) as connection:
+        with sqlite3.connect(path.absolute().as_uri() + "?mode=rw", uri=True) as connection:
             connection.execute("SELECT COUNT(*) FROM django_migrations").fetchone()
     except sqlite3.Error as error:
         return [f"{path} cannot be opened read-write: {error}"]
