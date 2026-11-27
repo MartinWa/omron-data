@@ -142,7 +142,8 @@ at build time, which is why a container never needs this step.
 to start instead of serving with a published key. A local run served straight over HTTP also
 needs `OMRON_DEBUG=true`: with debug off the session and CSRF cookies are `Secure`, so the
 server requires `OMRON_TRUSTED_PROXY` behind a TLS proxy and refuses to start without it.
-Set `OMRON_ALLOWED_HOSTS` too;
+Debug mode also binds the server to `127.0.0.1` only, so a local run is not exposed on the
+network. Set `OMRON_ALLOWED_HOSTS` too;
 `OMRON_DB_PATH` overrides the database location (default `.data/db.sqlite3`) and
 `OMRON_TIME_ZONE` sets the zone the export's wall clocks are read in (default
 `Europe/Stockholm`).

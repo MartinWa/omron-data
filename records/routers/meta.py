@@ -1,8 +1,11 @@
 import logging
+import sqlite3
+from contextlib import closing
 from pathlib import Path
 
 from django.db import connection
 from django.db.migrations.executor import MigrationExecutor
+from django.db.migrations.loader import MigrationLoader
 from ninja import Router
 
 from ..contract import STATUS_CODES, ApiError, envelope
@@ -30,21 +33,39 @@ def healthz(request, query: NoQuery = NO_VALUE):
     return {**envelope(), "status": "ok"}
 
 
-def _is_memory_database(name: str) -> bool:
-    return name == ":memory:" or "mode=memory" in name
+def _pending_problem(pending: list[str]) -> str | None:
+    if not pending:
+        return None
+    problem = f"{len(pending)} migration(s) pending ({', '.join(pending[:5])})"
+    logger.error("Readiness check failed: %s", problem)
+    return problem
 
 
-def _readiness_problem() -> str | None:
-    settings_dict = connection.settings_dict
-    name = settings_dict["NAME"]
-    if (
-        settings_dict.get("ENGINE") == "django.db.backends.sqlite3"
-        and not _is_memory_database(name)
-        and not Path(name).is_file()
-    ):
-        problem = f"database file {name} does not exist"
-        logger.error("Readiness check failed: %s", problem)
-        return problem
+def _sqlite_file_problem(name) -> str | None:
+    uri = f"file:{Path(name).as_posix()}?mode=rw"
+    try:
+        with closing(sqlite3.connect(uri, uri=True)) as probe:
+            probe.execute("SELECT 1")
+            try:
+                applied = {
+                    f"{app}.{migration}"
+                    for app, migration in probe.execute("SELECT app, name FROM django_migrations")
+                }
+            except sqlite3.OperationalError:
+                applied = set()
+    except sqlite3.Error:
+        logger.exception("Readiness check failed")
+        return "database probe raised"
+    loader = MigrationLoader(None)
+    pending = [
+        f"{app}.{migration}"
+        for app, migration in loader.graph.leaf_nodes()
+        if f"{app}.{migration}" not in applied
+    ]
+    return _pending_problem(pending)
+
+
+def _connection_problem() -> str | None:
     try:
         with connection.cursor() as cursor:
             cursor.execute("SELECT 1")
@@ -53,14 +74,17 @@ def _readiness_problem() -> str | None:
     except Exception:
         logger.exception("Readiness check failed")
         return "database check raised"
-    if pending:
-        listed = ", ".join(
-            f"{migration.app_label}.{migration.name}" for migration, _ in pending[:5]
-        )
-        problem = f"{len(pending)} migration(s) pending ({listed})"
-        logger.error("Readiness check failed: %s", problem)
-        return problem
-    return None
+    return _pending_problem([f"{migration.app_label}.{migration.name}" for migration, _ in pending])
+
+
+def _readiness_problem() -> str | None:
+    settings_dict = connection.settings_dict
+    if (
+        settings_dict.get("ENGINE") == "django.db.backends.sqlite3"
+        and not connection.is_in_memory_db()
+    ):
+        return _sqlite_file_problem(settings_dict["NAME"])
+    return _connection_problem()
 
 
 @router.get("/readyz", auth=None, response=HealthOut, tags=["meta"], summary="Readiness probe")

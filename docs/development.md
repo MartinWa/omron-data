@@ -75,7 +75,8 @@ uv run python -m tools.serve
 That verifies the data directory, applies migrations and serves on `OMRON_PORT` (8000) with
 `OMRON_THREADS` workers (8). Set `OMRON_DEBUG=true` for a working copy: with debug off the
 server refuses to start without `OMRON_TRUSTED_PROXY`, which only makes sense behind a
-reverse proxy. The entry point also honours `OMRON_TRUSTED_PROXY`, which plain
+reverse proxy. While debug is on the server binds `127.0.0.1` only; production binds all
+interfaces, because there the container is reached through the proxy. The entry point also honours `OMRON_TRUSTED_PROXY`, which plain
 `waitress-serve` cannot: served that way, a proxy's `X-Forwarded-Proto` is discarded and
 browser `POST`s fail the CSRF origin check.
 

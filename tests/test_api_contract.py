@@ -203,6 +203,9 @@ def test_readyz_answers_503_with_the_envelope_when_the_database_is_unreadable(
     class BrokenConnection:
         settings_dict = {"NAME": ":memory:", "ENGINE": "django.db.backends.sqlite3"}
 
+        def is_in_memory_db(self):
+            return True
+
         def cursor(self):
             raise OperationalError("disk I/O error")
 
@@ -234,6 +237,9 @@ def test_readyz_refuses_a_missing_database_file_without_creating_it(db, monkeypa
             "ENGINE": "django.db.backends.sqlite3",
         }
 
+        def is_in_memory_db(self):
+            return False
+
     monkeypatch.setattr(meta, "connection", MissingConnection())
 
     response = Client().get("/api/v1/readyz")
@@ -241,6 +247,32 @@ def test_readyz_refuses_a_missing_database_file_without_creating_it(db, monkeypa
     assert response.status_code == 503
     assert response.json()["error"]["message"] == "Service temporarily unavailable"
     assert not missing.exists()
+
+
+def test_readyz_treats_an_empty_database_file_as_pending_without_writing_to_it(
+    db, monkeypatch, tmp_path
+):
+    import records.routers.meta as meta
+
+    empty = tmp_path / "empty.sqlite3"
+    empty.touch()
+
+    class EmptyConnection:
+        settings_dict = {
+            "NAME": str(empty),
+            "ENGINE": "django.db.backends.sqlite3",
+        }
+
+        def is_in_memory_db(self):
+            return False
+
+    monkeypatch.setattr(meta, "connection", EmptyConnection())
+
+    response = Client().get("/api/v1/readyz")
+
+    assert response.status_code == 503
+    assert response.json()["error"]["message"] == "Service temporarily unavailable"
+    assert empty.stat().st_size == 0
 
 
 def test_metrics_matches_the_registry_with_units_and_kinds(auth):

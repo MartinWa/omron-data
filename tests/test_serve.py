@@ -5,7 +5,7 @@ import pytest
 from django.test import RequestFactory, override_settings
 from waitress.server import create_server
 
-from tools.serve import proxy_options, verify_proxy_configuration
+from tools.serve import listen_address, proxy_options, verify_proxy_configuration
 
 
 def echo_app(environ, start_response):
@@ -99,3 +99,15 @@ def test_debug_starts_without_a_trusted_proxy(settings):
     settings.OMRON_TRUSTED_PROXY = ""
 
     verify_proxy_configuration()
+
+
+def test_debug_binds_the_server_to_loopback_only(settings):
+    settings.DEBUG = True
+
+    assert listen_address(8000) == "127.0.0.1:8000"
+
+
+def test_production_binds_all_interfaces(settings):
+    settings.DEBUG = False
+
+    assert listen_address(8000) == "*:8000"

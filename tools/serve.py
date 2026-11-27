@@ -57,6 +57,11 @@ def verify_proxy_configuration() -> None:
     )
 
 
+def listen_address(port: int) -> str:
+    host = "127.0.0.1" if settings.DEBUG else "*"
+    return f"{host}:{port}"
+
+
 def database_path() -> Path:
     return Path(settings.DATABASES["default"]["NAME"])
 
@@ -80,7 +85,7 @@ def main() -> int:
     verify_proxy_configuration()
     verify_data_directory()
     call_command("migrate", interactive=False)
-    listen = f"*:{positive_int('OMRON_PORT', DEFAULT_PORT)}"
+    listen = listen_address(positive_int("OMRON_PORT", DEFAULT_PORT))
     threads = positive_int("OMRON_THREADS", DEFAULT_THREADS)
     serve(
         application,
