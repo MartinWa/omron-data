@@ -1,5 +1,6 @@
 import calendar
 import math
+from collections import deque
 from datetime import date, datetime, time, timedelta
 from urllib.parse import urlencode
 from zoneinfo import ZoneInfo
@@ -55,9 +56,11 @@ def nice_step(raw, integer=False):
         if integer and multiplier == 2.5 and exponent < 1:
             continue
         candidate = multiplier * (10**exponent)
+        if integer and candidate < 1:
+            continue
         if candidate >= raw:
             return float(candidate)
-    return float(10 ** (exponent + 1))
+    return max(1.0, float(10 ** (exponent + 1))) if integer else float(10 ** (exponent + 1))
 
 
 def nice_domain(lo, hi, integer=False):
@@ -116,11 +119,18 @@ def _shift_months(value, months):
     return date(year, month, day)
 
 
+def _days_before(value, days):
+    try:
+        return value - timedelta(days=days)
+    except OverflowError:
+        return date.min
+
+
 def _bucket_start(value, bucket):
     if bucket == "day":
         return value
     if bucket == "week":
-        return value - timedelta(days=value.weekday())
+        return _days_before(value, value.weekday())
     if bucket == "month":
         return value.replace(day=1)
     return value.replace(month=1, day=1)
@@ -481,6 +491,7 @@ COMPOSITION_METRICS = (
 COMBINED_COMPOSITION = ("body_fat_pct", "skeletal_muscle_pct")
 DEFAULT_COMPOSITION = COMPOSITION_METRICS[0]
 HEATMAP_DAYS = 364
+MAX_HEATMAP_COLUMNS = 54
 WEEKDAYS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
 SEVEN_DAYS = 7
 METRIC_ROW_LIMIT = 500
@@ -585,7 +596,10 @@ def resolve_range(key, today, earliest, date_from=None, date_to=None):
         if start > end:
             return resolve_range(DEFAULT_RANGE, today, earliest)
         days = (end - start).days + 1
-        previous = {"start": start - timedelta(days=days), "end": start - timedelta(days=1)}
+        try:
+            previous = {"start": start - timedelta(days=days), "end": start - timedelta(days=1)}
+        except OverflowError:
+            previous = None
         return {
             "key": "custom",
             "start": start,
@@ -600,9 +614,9 @@ def resolve_range(key, today, earliest, date_from=None, date_to=None):
         start = earliest or today
     else:
         days = RANGE_DAYS[key]
-        start = today - timedelta(days=days - 1)
-        previous_end = start - timedelta(days=1)
-        previous = {"start": previous_end - timedelta(days=days - 1), "end": previous_end}
+        start = _days_before(today, days - 1)
+        previous_end = _days_before(start, 1)
+        previous = {"start": _days_before(previous_end, days - 1), "end": previous_end}
     return {
         "key": key,
         "start": start,
@@ -626,6 +640,17 @@ def _range_query(key, date_from=None, date_to=None):
         if date_to is not None:
             query["to"] = date_to.isoformat()
     return query
+
+
+def _readings_url(metric, resolved):
+    return filtered_url(
+        reverse("readings"),
+        {
+            "metric": metric,
+            "from": resolved["start"].isoformat(),
+            "to": resolved["end"].isoformat(),
+        },
+    )
 
 
 def delta(current, previous, *, absolute=False, suffix="", precision=1, harm="none", comparison=""):
@@ -741,7 +766,7 @@ def _first_date(owner):
 
 
 def _fetch_window(resolved):
-    starts = [resolved["start"], resolved["end"] - timedelta(days=HEATMAP_DAYS)]
+    starts = [resolved["start"], _days_before(resolved["end"], HEATMAP_DAYS)]
     if resolved["previous"]:
         starts.append(resolved["previous"]["start"])
     return min(starts), resolved["end"]
@@ -834,16 +859,21 @@ def _day_ticks(start, end, maximum=4, multi_year=False):
 
 
 def _rolling_average(points):
-    averages = {}
+    by_day = {}
     for point in points:
-        day = point["date"]
-        window = [
-            other["value"]
-            for other in points
-            if day - timedelta(days=SEVEN_DAYS - 1) <= other["date"] <= day
-        ]
-        if window:
-            averages[day] = sum(window) / len(window)
+        by_day.setdefault(point["date"], []).append(point["value"])
+    window = deque()
+    total = 0.0
+    averages = {}
+    for day in sorted(by_day):
+        for value in by_day[day]:
+            window.append((day, value))
+            total += value
+        cutoff = _days_before(day, SEVEN_DAYS - 1)
+        while window and window[0][0] < cutoff:
+            _, old_value = window.popleft()
+            total -= old_value
+        averages[day] = total / len(window)
     return averages
 
 
@@ -874,7 +904,10 @@ def _category_legend():
     return legend
 
 
-def _bp_category(systolic, diastolic):
+RANK_TONES = ("cat-ok", "cat-elevated", "cat-stage1", "cat-danger", "cat-danger")
+
+
+def _category_rank(systolic, diastolic):
     def rank_systolic(value):
         if value > 180:
             return 4
@@ -895,7 +928,11 @@ def _bp_category(systolic, diastolic):
             return 2
         return 0
 
-    rank = max(rank_systolic(systolic), rank_diastolic(diastolic))
+    return max(rank_systolic(systolic), rank_diastolic(diastolic))
+
+
+def _bp_category(systolic, diastolic):
+    rank = _category_rank(systolic, diastolic)
     if rank == 4:
         return {"text": "Hypertensive crisis", "class": "band-danger"}
     if rank == 3:
@@ -919,7 +956,7 @@ def _kpi_cards(owner, series, resolved, last_import):
     pair = _latest_pair(owner)
     latest_text = "—" if pair is None else _pressure_text(*pair)
 
-    seven_start = end - timedelta(days=SEVEN_DAYS - 1)
+    seven_start = max(start, _days_before(end, SEVEN_DAYS - 1))
     seven_systolic = [
         point["value"]
         for point in series.get("systolic_bp", [])
@@ -939,7 +976,9 @@ def _kpi_cards(owner, series, resolved, last_import):
         )
     if previous:
         previous_seven_end = previous["end"]
-        previous_seven_start = previous_seven_end - timedelta(days=SEVEN_DAYS - 1)
+        previous_seven_start = max(
+            previous["start"], _days_before(previous_seven_end, SEVEN_DAYS - 1)
+        )
         previous_seven_systolic = _mean(
             point["value"]
             for point in series.get("systolic_bp", [])
@@ -1051,6 +1090,35 @@ def _blood_pressure_card(series, resolved):
             points.append(((point["date"] - start).days, point["value"], tone, title))
         return points
 
+    pairs = {}
+    for point in systolic:
+        pairs.setdefault(point["at"], {})["systolic"] = point
+    for point in diastolic:
+        pairs.setdefault(point["at"], {})["diastolic"] = point
+    pair_tone = {}
+    pair_text = {}
+    for at, pair in pairs.items():
+        sys_point = pair.get("systolic")
+        dia_point = pair.get("diastolic")
+        if sys_point is None or dia_point is None:
+            continue
+        pair_tone[at] = RANK_TONES[_category_rank(sys_point["value"], dia_point["value"])]
+        pair_text[at] = (
+            f"{_pressure_text(sys_point['value'], dia_point['value'])}"
+            f" — {_bp_category(sys_point['value'], dia_point['value'])['text']}"
+        )
+
+    def bp_points(readings, label, fallback_tone):
+        points = []
+        for point in readings:
+            tone = pair_tone.get(point["at"]) or fallback_tone(point["value"])
+            if point["at"] in pair_text:
+                title = f"{point['stamp']} — {pair_text[point['at']]}"
+            else:
+                title = f"{point['stamp']} — {label} {_metric_value_text('mmHg', point['value'])}"
+            points.append(((point["date"] - start).days, point["value"], tone, title))
+        return points
+
     systolic_average = _rolling_average(systolic)
     diastolic_average = _rolling_average(diastolic)
     systolic_marks = [
@@ -1075,13 +1143,13 @@ def _blood_pressure_card(series, resolved):
         [
             {
                 "label": "Systolic",
-                "points": points_of(systolic, "mmHg", "Systolic", _reference_tone),
+                "points": bp_points(systolic, "Systolic", _reference_tone),
                 "dots_all": True,
                 "marks": systolic_marks,
             },
             {
                 "label": "Diastolic",
-                "points": points_of(diastolic, "mmHg", "Diastolic", _diastolic_tone),
+                "points": bp_points(diastolic, "Diastolic", _diastolic_tone),
                 "dots_all": True,
                 "marks": diastolic_marks,
             },
@@ -1324,19 +1392,13 @@ def _combined_composition_card(series, metric, resolved):
         "links": [
             {
                 "label": f"All {METRIC_LABELS[code].lower()} readings",
-                "url": filtered_url(
-                    reverse("dashboard_metric", kwargs={"metric": code}),
-                    _range_query(resolved["key"], resolved["start"], resolved["end"]),
-                ),
+                "url": _readings_url(code, resolved),
             }
             for code in COMBINED_COMPOSITION
         ],
         "rows": rows_all[-CARD_ROW_LIMIT:],
         "rows_total": len(rows_all),
-        "rows_url": filtered_url(
-            reverse("dashboard_metric", kwargs={"metric": metric}),
-            _range_query(resolved["key"], resolved["start"], resolved["end"]),
-        ),
+        "rows_url": _readings_url(metric, resolved),
         "has_points": bool(rows_all),
         "readings": len(rows_all),
     }
@@ -1405,10 +1467,7 @@ def _composition_card(series, metric, resolved):
         "links": [],
         "rows": rows_all[-CARD_ROW_LIMIT:],
         "rows_total": len(rows_all),
-        "rows_url": filtered_url(
-            reverse("dashboard_metric", kwargs={"metric": metric}),
-            _range_query(resolved["key"], resolved["start"], resolved["end"]),
-        ),
+        "rows_url": _readings_url(metric, resolved),
         "has_points": bool(readings),
         "readings": len(readings),
     }
@@ -1423,10 +1482,14 @@ def _heat_level(count):
 def _consistency_card(series, resolved):
     start = resolved["start"]
     end = resolved["end"]
-    grid_start = start - timedelta(days=start.weekday())
     grid_end = end + timedelta(days=6 - end.weekday())
+    grid_start = max(
+        _days_before(start, start.weekday()),
+        _days_before(grid_end, MAX_HEATMAP_COLUMNS * 7 - 1),
+    )
+    heat_start = max(start, grid_start)
     counts = {}
-    for point in _range_readings(series, start, end):
+    for point in _range_readings(series, heat_start, end):
         counts[point["date"]] = counts.get(point["date"], 0) + 1
     weeks = []
     current = grid_start
@@ -1434,7 +1497,7 @@ def _consistency_card(series, resolved):
         cells = []
         for offset in range(7):
             day = current + timedelta(days=offset)
-            active = start <= day <= end
+            active = heat_start <= day <= end
             count = counts.get(day, 0)
             if not active:
                 title = ""
@@ -1453,7 +1516,7 @@ def _consistency_card(series, resolved):
             )
         weeks.append({"cells": cells, "label": ""})
         current += timedelta(days=7)
-    multi_year = start.year != end.year
+    multi_year = heat_start.year != end.year
     step = max(1, math.ceil(len(weeks) / 8))
     if len(weeks) <= 6:
         step = max(step, 2)
@@ -1475,7 +1538,9 @@ def _consistency_card(series, resolved):
         "days": len(heat_rows),
         "readings": sum(counts.values()),
         "has_heatmap": bool(heat_rows),
-        "window_label": period_label(start, end),
+        "clamped": heat_start > start,
+        "clamped_days": (end - heat_start).days + 1,
+        "window_label": period_label(heat_start, end),
     }
 
 
@@ -1685,25 +1750,39 @@ def _dashboard_scaffold(owner, params, today, active):
             "last_import": last_import,
             "readings_total": len(readings),
             "range_empty": not readings,
-            "last_reading_days": (end - max(last_dates)).days if last_dates else None,
+            "last_reading_days": (today - max(last_dates)).days if last_dates else None,
         }
     )
     return context, parsed, resolved, series
 
 
-def _section_cards(context, blood_pressure, weight):
+def _latest_window_pair(series, start, end):
+    moments = {}
+    for code in PRESSURE_METRICS:
+        for point in _in_window(series.get(code, []), start, end):
+            moments.setdefault(point["at"], {})[code] = point["value"]
+    for at in sorted(moments, reverse=True):
+        values = moments[at]
+        if len(values) == len(PRESSURE_METRICS):
+            return values["systolic_bp"], values["diastolic_bp"]
+    return None
+
+
+def _section_cards(context, pair, weight_text):
     nav = {item["key"]: item for item in context["dashboard_nav"]}
     kpis = {card["key"]: card for card in context["kpis"]}
-    if blood_pressure["latest"]:
-        bp_summary = f"Latest {blood_pressure['latest']}"
-        bp_extra = f"AHA category: {blood_pressure['category']['text']}"
-        bp_extra_class = blood_pressure["category"]["class"]
+    if pair is not None:
+        category = _bp_category(*pair)
+        bp_summary = f"Latest {_pressure_text(*pair)}"
+        bp_extra = f"AHA category: {category['text']}"
+        bp_extra_class = category["class"]
     else:
         bp_summary = f"No blood pressure readings in {context['period_label']}"
         bp_extra = ""
         bp_extra_class = ""
-    if weight["has_points"]:
-        weight_summary = f"Latest {weight['rows'][-1]['value']}"
+    weight_has_points = weight_text is not None
+    if weight_has_points:
+        weight_summary = f"Latest {weight_text}"
     else:
         weight_summary = f"No weight readings in {context['period_label']}"
     return [
@@ -1730,7 +1809,7 @@ def _section_cards(context, blood_pressure, weight):
                 "or one other composition metric at a time."
             ),
             "summary": weight_summary,
-            "delta": kpis["weight"]["delta"] if weight["has_points"] else None,
+            "delta": kpis["weight"]["delta"] if weight_has_points else None,
             "cta": "Open weight & composition",
         },
         {
@@ -1751,17 +1830,16 @@ def build_dashboards(owner, params, today):
     context["kpis"] = _kpi_cards(owner, series, resolved, context["last_import"])
     if context["range_empty"]:
         return context
-    blood_pressure = _blood_pressure_card(series, resolved)
-    weight = _weight_card(series, resolved)
+    start = resolved["start"]
+    end = resolved["end"]
+    weights = _in_window(series.get("body_weight", []), start, end)
+    weight_text = _kg_text(weights[-1]["value"]) if weights else None
     context.update(
         {
-            "blood_pressure": blood_pressure,
-            "weight": weight,
-            "composition": _composition_card(series, parsed["metric"], resolved),
-            "consistency": _consistency_card(series, resolved),
-            "weekly": _weekly_card(series, resolved),
             "extremes": _extremes_card(series, resolved),
-            "sections": _section_cards(context, blood_pressure, weight),
+            "sections": _section_cards(
+                context, _latest_window_pair(series, start, end), weight_text
+            ),
         }
     )
     return context

@@ -19,6 +19,7 @@ from django.utils import timezone
 from records.models import METRICS, PANEL, ImportRun, Measurement
 from records.reports import (
     CARD_ROW_LIMIT,
+    MAX_HEATMAP_COLUMNS,
     METRIC_DOMAINS,
     RANGE_KEYS,
     TALL_CHART_HEIGHT,
@@ -282,7 +283,7 @@ def test_the_blood_pressure_metric_page_renders_the_real_panel(signed_in):
     assert "chart-band" not in body
     assert 'class="chart-dot series-1 cat-elevated"' in body
     assert 'class="chart-dot series-1 cat-stage1"' in body
-    assert 'class="chart-dot series-2 cat-ok"' in body
+    assert 'class="chart-dot series-2 cat-stage1"' in body
     assert '<th scope="col" class="num">Systolic</th>' in body
     assert "126/78 mmHg" in body
     assert 'class="segmented-item is-current" href="?range=90d" aria-current="true">' in body
@@ -597,7 +598,7 @@ def test_a_custom_range_across_a_year_boundary_labels_january_ticks_with_the_yea
             note="",
         )
 
-    across = build_dashboards(
+    across = build_dashboard_weight(
         user, {"range": "custom", "from": "2025-12-20", "to": "2026-01-10"}, date(2026, 1, 10)
     )
     labels = [label["label"] for label in across["weight"]["chart"]["xlabels"]]
@@ -1126,21 +1127,24 @@ def test_the_blood_pressure_dots_carry_the_aha_tone_and_the_axis_is_not_stretche
 
     assert "bands" not in chart
     assert [dot["class"] for dot in chart["lines"][0]["dots"]] == [
-        "cat-ok",
+        "cat-stage1",
         "cat-danger",
-        "cat-elevated",
+        "cat-stage1",
     ]
     assert [dot["class"] for dot in chart["lines"][1]["dots"]] == [
         "cat-stage1",
         "cat-danger",
         "cat-stage1",
     ]
+    titles = [dot["title"] for dot in chart["lines"][0]["dots"]]
+    assert "118/82 mmHg — Stage 1" in titles[0]
+    assert "141/92 mmHg — Stage 2" in titles[1]
     assert chart["y_min"] == 80.0
     assert chart["y_max"] == 160.0
     assert [tick["label"] for tick in chart["ticks"]] == ["80 mmHg", "120 mmHg", "160 mmHg"]
     assert '<circle class="chart-dot series-1 cat-danger"' in body
     assert '<rect class="chart-dot series-2 cat-danger"' in body
-    assert '<circle class="chart-dot series-1 cat-ok"' in body
+    assert '<circle class="chart-dot series-1 cat-stage1"' in body
     assert "chart-band" not in body
     swatches = [
         (cls, html.unescape(label))
@@ -1330,6 +1334,68 @@ def test_the_seven_day_window_arithmetic_crosses_a_month_boundary():
     assert _rolling_average(sparse) == {date(2026, 2, 20): 80.0, date(2026, 3, 2): 72.0}
 
 
+def test_the_heatmap_caps_its_columns_for_a_huge_custom_range(signed_in):
+    today = timezone.localdate()
+    response = signed_in.get(
+        reverse("dashboard_consistency"),
+        {
+            "range": "custom",
+            "from": (today - timedelta(days=800)).isoformat(),
+            "to": today.isoformat(),
+        },
+    )
+    consistency = response.context["consistency"]
+
+    assert len(consistency["weeks"]) <= MAX_HEATMAP_COLUMNS
+    assert consistency["clamped"] is True
+    assert 372 <= consistency["clamped_days"] <= 378
+    assert f"capped to the most recent {consistency['clamped_days']} days" in content_of(response)
+
+    normal = signed_in.get(reverse("dashboard_consistency"), {"range": "all"})
+    assert normal.context["consistency"]["clamped"] is False
+    assert "capped to the most recent" not in content_of(normal)
+
+
+def test_the_seven_day_kpi_lookbacks_are_clamped_to_their_own_periods(client, db):
+    user = get_user_model().objects.create_user(username="kpi-windows")
+    today = timezone.localdate()
+    rows = []
+    for offset in range(11):
+        at = moment(today - timedelta(days=offset))
+        panel = Measurement.objects.create(owner=user, metric=PANEL, at=at, unit="", note="")
+        for metric, value in (("systolic_bp", 120 + offset), ("diastolic_bp", 80), ("pulse", 60)):
+            row = measurement(user, metric, at, value)
+            row.parent = panel
+            rows.append(row)
+    Measurement.objects.bulk_create(rows)
+    client.force_login(user)
+
+    day = today - timedelta(days=5)
+    response = client.get(
+        reverse("dashboards"), {"range": "custom", "from": day.isoformat(), "to": day.isoformat()}
+    )
+    seven = {card["key"]: card for card in response.context["kpis"]}["seven-day"]
+
+    assert seven["sub"] == "based on 1 reading"
+    assert seven["delta"]["text"] == "−1 mmHg"
+    assert seven["delta"]["aria"] == "down 1 mmHg versus the previous period"
+
+
+def test_the_reading_age_uses_the_real_today_not_the_range_end(signed_in):
+    today = timezone.localdate()
+    response = signed_in.get(
+        reverse("dashboard_weight"),
+        {
+            "range": "custom",
+            "from": (today - timedelta(days=40)).isoformat(),
+            "to": (today - timedelta(days=20)).isoformat(),
+        },
+    )
+
+    assert response.context["last_reading_days"] == 21
+    assert "last reading 21 days ago" in content_of(response)
+
+
 def test_a_single_weigh_in_still_renders_a_dot_and_a_row(client, db):
     user = get_user_model().objects.create_user(username="once")
     weigh_ins(user, timezone.localdate(), [0])
@@ -1344,6 +1410,8 @@ def test_a_single_weigh_in_still_renders_a_dot_and_a_row(client, db):
     line = weight["chart"]["lines"][0]
     assert len(line["segments"]) == 1
     assert len(line["dots"]) == 1
+    assert len(weight["chart"]["lines"][1]["dots"]) == 1
+    assert 'class="chart-dot series-2 avg"' in body
     assert len(weight["rows"]) == 1
     assert weight["rows"][0]["value"] == "72.0 kg"
     assert weight["rows"][0]["average"] == "72.0 kg"
@@ -1408,10 +1476,12 @@ def test_the_metric_switch_draws_the_combined_chart_for_the_two_percentages(sign
             ("Body fat 7-day average", "series-1 avg"),
             ("Skeletal muscle 7-day average", "series-4 avg"),
         ]
-        assert [link["url"] for link in composition["links"]] == [
-            "/dashboards/body_fat_pct/?range=30d",
-            "/dashboards/skeletal_muscle_pct/?range=30d",
+        today = timezone.localdate()
+        expected = [
+            f"/readings/?metric=body_fat_pct&from={(today - timedelta(days=29)).isoformat()}&to={today.isoformat()}",
+            f"/readings/?metric=skeletal_muscle_pct&from={(today - timedelta(days=29)).isoformat()}&to={today.isoformat()}",
         ]
+        assert [link["url"] for link in composition["links"]] == expected
 
     body = content_of(signed_in.get(reverse("dashboard_weight")))
     section = body.split("Body composition", 1)[1].split("</section>", 1)[0]
@@ -1425,8 +1495,10 @@ def test_the_metric_switch_draws_the_combined_chart_for_the_two_percentages(sign
     assert "Skeletal muscle 7-day average (%)" in section
     assert '<th scope="col" class="num">Body fat (%)</th>' in section
     assert '<th scope="col" class="num">Skeletal muscle (%)</th>' in section
-    assert 'href="/dashboards/body_fat_pct/?range=30d"' in section
-    assert 'href="/dashboards/skeletal_muscle_pct/?range=30d"' in section
+    today = timezone.localdate()
+    window = f"from={(today - timedelta(days=29)).isoformat()}&amp;to={today.isoformat()}"
+    assert f'href="/readings/?metric=body_fat_pct&amp;{window}"' in section
+    assert f'href="/readings/?metric=skeletal_muscle_pct&amp;{window}"' in section
 
 
 def test_the_composition_switcher_offers_one_pill_for_the_combined_chart(signed_in):
@@ -1479,7 +1551,11 @@ def test_the_weight_page_defaults_to_the_combined_fat_and_muscle_chart(signed_in
     assert all(row["skeletal_muscle_pct"] != "—" for row in composition["rows"])
     assert composition["rows"][0]["body_fat_pct"].endswith("%")
     assert composition["rows"][0]["skeletal_muscle_pct"].endswith("%")
-    assert composition["rows_url"] == "/dashboards/body_fat_pct/?range=30d"
+    today = timezone.localdate()
+    assert composition["rows_url"] == (
+        f"/readings/?metric=body_fat_pct&from={(today - timedelta(days=29)).isoformat()}"
+        f"&to={today.isoformat()}"
+    )
     body = content_of(response)
     assert "Body fat and skeletal muscle are both percentages" in body
 
@@ -1603,9 +1679,7 @@ def test_the_chart_dots_and_lines_carry_hover_titles_and_are_focusable(signed_in
         r'<polyline class="chart-line series-2 avg"[^>]*fill="none"><title>7-day average</title></polyline>',
         weight_section,
     )
-    assert re.search(
-        r'<circle class="chart-dot series-1 dot-latest"[^>]*tabindex="0">', weight_section
-    )
+    assert re.search(r'<circle class="chart-dot series-1 dot-latest"[^>]*>', weight_section)
     weight_titles = re.findall(r"<title>([^<]+)</title>", weight_section)
     assert any(title.endswith("kg") and " — " in title for title in weight_titles)
     assert "Latest " in weight_titles[-1] or any(t.startswith("Latest ") for t in weight_titles)
@@ -1621,9 +1695,11 @@ def test_the_chart_dots_and_lines_carry_hover_titles_and_are_focusable(signed_in
     assert any("Skeletal muscle" in title and "%" in title for title in composition_titles)
 
     bp_body = content_of(signed_in.get(bp_url(), {"range": "30d"}))
-    assert re.search(r"<title>\d+ \w+ \d+ \d+:\d+ — Systolic \d+ mmHg</title>", bp_body)
-    assert re.search(r"<title>\d+ \w+ \d+ \d+:\d+ — Diastolic \d+ mmHg</title>", bp_body)
-    assert re.search(r'<circle class="chart-dot series-1[^"]*"[^>]*tabindex="0">', bp_body)
+    assert re.search(r"<title>\d+ \w+ \d+ \d+:\d+ — \d+/\d+ mmHg — [A-Za-z ]+</title>", bp_body)
+    assert re.search(r"<title>\d+ \w+ \d+ \d+:\d+ — \d+/\d+ mmHg — Stage 1</title>", bp_body)
+    assert re.search(r'<circle class="chart-dot series-1[^"]*"[^>]*>', bp_body)
+    assert re.search(r'<svg class="chart chart-lines"[^>]*tabindex="0"', bp_body)
+    assert "tabindex" not in re.search(r'<circle class="chart-dot[^>]*>', bp_body).group(0)
 
 
 def test_the_weekly_bars_carry_the_bucket_label_and_the_count_in_a_title(signed_in):
@@ -1880,6 +1956,12 @@ def test_the_chart_tip_script_shows_and_hides_the_tip_from_the_shape_title():
     assert 'setAttribute("visibility", "visible")' in script
     assert 'setAttribute("visibility", "hidden")' in script
     assert "getBBox()" in script
+    assert 'addEventListener("keydown"' in script
+    assert "ArrowRight" in script and "ArrowLeft" in script
+    assert "ArrowDown" in script and "ArrowUp" in script
+    assert "Home" in script and "End" in script
+    assert "chart-point-active" in script
+    assert ".chart-dot:not(.avg), .chart-bar" in script
 
 
 def test_the_builders_return_the_whole_page_without_a_request(owner):
@@ -1897,14 +1979,10 @@ def test_the_builders_return_the_whole_page_without_a_request(owner):
         "dashboard_nav",
         "dashboards_url",
         "kpis",
-        "blood_pressure",
-        "weight",
-        "composition",
-        "consistency",
-        "weekly",
         "extremes",
         "sections",
     }
+    assert not {"blood_pressure", "weight", "composition", "consistency", "weekly"} & set(context)
     assert [item["key"] for item in context["dashboard_nav"]] == [
         "overview",
         "blood_pressure",
@@ -2002,9 +2080,9 @@ def test_the_seven_day_average_delta_is_absolute_mmhg_and_worse_when_it_rises(cl
 @pytest.mark.django_db
 def test_the_composition_card_honours_each_metric_domain(signed_in):
     for metric, (low, high) in METRIC_DOMAINS.items():
-        chart = signed_in.get(reverse("dashboards"), {"metric": metric}).context["composition"][
-            "chart"
-        ]
+        chart = signed_in.get(reverse("dashboard_weight"), {"metric": metric}).context[
+            "composition"
+        ]["chart"]
 
         assert chart["y_min"] <= low, metric
         assert chart["y_max"] >= high, metric
@@ -2022,9 +2100,9 @@ def test_the_composition_domain_widens_instead_of_clipping_data_outside_it(clien
     )
     client.force_login(user)
 
-    chart = client.get(reverse("dashboards"), {"metric": "body_fat_pct", "range": "all"}).context[
-        "composition"
-    ]["chart"]
+    chart = client.get(
+        reverse("dashboard_weight"), {"metric": "body_fat_pct", "range": "all"}
+    ).context["composition"]["chart"]
 
     assert chart["y_min"] <= 10
     assert chart["y_max"] >= 50
@@ -2048,9 +2126,13 @@ def test_the_composition_table_caps_at_two_hundred_rows_with_a_note_and_a_link(c
 
     assert len(composition["rows"]) == CARD_ROW_LIMIT
     assert composition["rows_total"] == CARD_ROW_LIMIT + 50
-    assert composition["rows_url"] == "/dashboards/body_fat_pct/?range=all"
+    expected_url = (
+        f"/readings/?metric=body_fat_pct&from={(today - timedelta(days=CARD_ROW_LIMIT + 49)).isoformat()}"
+        f"&to={today.isoformat()}"
+    )
+    assert composition["rows_url"] == expected_url
     assert f"Showing the {CARD_ROW_LIMIT} most recent of {CARD_ROW_LIMIT + 50} readings" in body
-    assert 'href="/dashboards/body_fat_pct/?range=all"' in body
+    assert f'href="{expected_url.replace("&", "&amp;")}"' in body
 
 
 @pytest.mark.django_db
@@ -2185,7 +2267,7 @@ def test_the_page_shows_the_year_on_january_day_ticks_across_a_year_boundary(cli
         )
     client.force_login(user)
 
-    across = build_dashboards(user, {"range": "all"}, date(2026, 1, 10))
+    across = build_dashboard_weight(user, {"range": "all"}, date(2026, 1, 10))
     labels = [label["label"] for label in across["weight"]["chart"]["xlabels"]]
     assert "3 Jan 2026" in labels
     assert "20 Dec" in labels
@@ -2201,6 +2283,6 @@ def test_the_page_shows_the_year_on_january_day_ticks_across_a_year_boundary(cli
             unit="kg",
             note="",
         )
-    single = build_dashboards(single_year_user, {"range": "all"}, date(2026, 1, 9))
+    single = build_dashboard_weight(single_year_user, {"range": "all"}, date(2026, 1, 9))
     labels = [label["label"] for label in single["weight"]["chart"]["xlabels"]]
     assert labels == ["2 Jan", "4 Jan", "7 Jan", "9 Jan"]

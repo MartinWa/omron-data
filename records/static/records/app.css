@@ -1672,15 +1672,6 @@ a.pager-page:hover {
   }
 }
 
-@supports not (top: anchor(bottom)) {
-  .range-popover {
-    position: absolute;
-    top: 100%;
-    left: 0;
-    right: 0;
-  }
-}
-
 .segmented {
   display: inline-flex;
   flex-wrap: wrap;
@@ -1855,6 +1846,15 @@ body:has(#custom-range-popover:popover-open) button[popovertarget="custom-range-
   stroke: var(--surface);
   stroke-width: 1;
   pointer-events: all;
+}
+
+.chart-dot.avg {
+  pointer-events: none;
+}
+
+.chart-dot.chart-point-active {
+  stroke: var(--text);
+  stroke-width: 2;
 }
 
 .chart-dot.series-2 {

@@ -1,6 +1,8 @@
 import re
+import time
 from datetime import date, timedelta
 
+import pytest
 from django.template.loader import render_to_string
 
 from records.reports import (
@@ -17,6 +19,7 @@ from records.reports import (
     TALL_CHART_HEIGHT,
     _day_ticks,
     _plot_frame,
+    _rolling_average,
     _round_coord,
     axis_ticks,
     bar_chart,
@@ -698,8 +701,10 @@ def test_line_chart_carries_a_per_point_title_into_the_dots_and_the_label_into_t
     )
     assert "<title>25 Nov 2026 08:00 — Systolic 120 mmHg</title>" in markup
     assert "<title>26 Nov 2026 08:00 — Systolic 141 mmHg</title>" in markup
-    assert markup.count('tabindex="0"') == 2
-    assert re.search(r'<circle class="chart-dot series-1 cat-ok"[^>]*tabindex="0">', markup)
+    assert markup.count('tabindex="0"') == 1
+    assert re.search(r'<svg class="chart chart-lines"[^>]*tabindex="0"', markup)
+    assert re.search(r'<circle class="chart-dot series-1 cat-ok"[^>]*>', markup)
+    assert "tabindex" not in re.search(r'<circle class="chart-dot[^>]*>', markup).group(0)
 
 
 def test_line_chart_renders_a_single_point_line_as_a_lone_dot():
@@ -722,7 +727,7 @@ def test_line_chart_renders_a_single_point_line_as_a_lone_dot():
     assert markup.count("<circle") == 2
     assert markup.count("<rect") == 2
     assert '<rect class="chart-dot series-2 avg"' in markup
-    assert markup.count('tabindex="0"') == 3
+    assert markup.count('tabindex="0"') == 1
 
 
 def test_bar_chart_can_override_the_bucket_labels_for_a_weekday_chart():
@@ -823,6 +828,62 @@ def test_report_chart_partial_renders_lines_then_dots_then_the_tip_so_dots_win_p
         < markup.index('class="chart-tip"')
     )
     assert markup.rstrip().endswith("</svg>")
+
+
+def test_resolve_range_near_date_min_does_not_raise():
+    resolved = resolve_range("custom", date(1, 1, 31), date(1, 1, 1), date(1, 1, 1), date(1, 1, 31))
+
+    assert resolved["key"] == "custom"
+    assert resolved["start"] == date(1, 1, 1)
+    assert resolved["previous"] is None
+
+    preset = resolve_range("30d", date(1, 1, 10), date(1, 1, 1))
+    assert preset["start"] == date.min
+
+
+def test_the_rolling_average_matches_the_naive_window_for_random_data():
+    points = [
+        {
+            "date": date(2026, 1, 1) + timedelta(days=(index * 13) % 40),
+            "value": (index * 37) % 100,
+        }
+        for index in range(200)
+    ]
+    averages = _rolling_average(points)
+
+    assert len(averages) == len({point["date"] for point in points})
+    for day, average in averages.items():
+        window = [
+            point["value"] for point in points if day - timedelta(days=6) <= point["date"] <= day
+        ]
+        assert average == pytest.approx(sum(window) / len(window))
+
+
+def test_the_rolling_average_stays_a_single_pass_over_many_points():
+    points = [
+        {"date": date(2000, 1, 1) + timedelta(days=index), "value": float(index % 50)}
+        for index in range(20000)
+    ]
+    started = time.perf_counter()
+    averages = _rolling_average(points)
+    elapsed = time.perf_counter() - started
+
+    assert len(averages) == 20000
+    expected = sum(float(index % 50) for index in range(19993, 20000)) / 7
+    assert averages[points[-1]["date"]] == pytest.approx(expected)
+    assert elapsed < 5
+
+
+def test_integer_steps_never_go_below_one():
+    pulse = line_chart(
+        [{"label": "Pulse", "points": [(0, 60), (1, 61)]}], x_max=1, x_ticks=[], y_unit="/min"
+    )
+    assert [tick["label"] for tick in pulse["ticks"]] == ["60 /min", "61 /min", "62 /min"]
+
+    weight = line_chart(
+        [{"label": "W", "points": [(0, 72.4), (1, 72.5)]}], x_max=1, x_ticks=[], y_unit="kg"
+    )
+    assert any("." in tick["label"] for tick in weight["ticks"])
 
 
 def test_line_chart_axis_follows_the_data_only_so_a_high_point_does_not_stretch_it():

@@ -34,18 +34,53 @@
   function hide(svg) {
     const tip = svg.querySelector(".chart-tip");
     if (tip) tip.setAttribute("visibility", "hidden");
+    const marked = svg.querySelector(".chart-point-active");
+    if (marked) marked.classList.remove("chart-point-active");
   }
 
   document.querySelectorAll("svg.chart").forEach(function (svg) {
+    const markers = Array.from(svg.querySelectorAll(".chart-dot:not(.avg), .chart-bar"));
+    let active = -1;
+
+    function setActive(index) {
+      if (active >= 0 && markers[active]) markers[active].classList.remove("chart-point-active");
+      active = index;
+      const marker = markers[active];
+      if (!marker) return;
+      marker.classList.add("chart-point-active");
+      const text = titleOf(marker);
+      if (text) show(svg, marker, text);
+    }
+
+    svg.addEventListener("keydown", function (event) {
+      if (!markers.length) return;
+      if (event.key === "ArrowRight" || event.key === "ArrowDown") {
+        setActive(Math.min(active + 1, markers.length - 1));
+        event.preventDefault();
+      } else if (event.key === "ArrowLeft" || event.key === "ArrowUp") {
+        setActive(Math.max(active - 1, 0));
+        event.preventDefault();
+      } else if (event.key === "Home") {
+        setActive(0);
+        event.preventDefault();
+      } else if (event.key === "End") {
+        setActive(markers.length - 1);
+        event.preventDefault();
+      }
+    });
     svg.addEventListener("mouseover", function (event) {
       if (!event.target.closest) return;
       const shape = event.target.closest(".chart-dot, .chart-bar, .chart-line");
       if (!shape || !svg.contains(shape)) return;
+      setActive(-1);
       const text = titleOf(shape);
       if (text) show(svg, shape, text);
     });
     svg.addEventListener("mouseout", function (event) {
-      if (!svg.contains(event.relatedTarget)) hide(svg);
+      if (!svg.contains(event.relatedTarget)) {
+        setActive(-1);
+        hide(svg);
+      }
     });
     svg.addEventListener("focusin", function (event) {
       if (!event.target.closest) return;

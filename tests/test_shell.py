@@ -249,6 +249,10 @@ def test_the_avg_line_and_tip_have_their_own_styles():
     assert "stroke: var(--surface);" in css_block(css, ".chart-dot {")
     assert "stroke-width: 1;" in css_block(css, ".chart-dot {")
     assert "pointer-events: all;" in css_block(css, ".chart-dot {")
+    assert "pointer-events: none;" in css_block(css, ".chart-dot.avg {")
+    active = css_block(css, ".chart-dot.chart-point-active {")
+    assert "stroke: var(--text);" in active
+    assert "stroke-width: 2;" in active
 
 
 def test_the_custom_range_popover_is_a_toolbar_wide_card_hidden_in_print():
@@ -307,14 +311,8 @@ def test_the_custom_range_popover_is_a_toolbar_wide_card_hidden_in_print():
     assert "position-try-fallbacks: flip-block;" in anchored
     assert "right:" not in anchored
     assert "position-area" not in css
-
-    fallback = css_block(
-        css_block(css, "@supports not (top: anchor(bottom)) {"), ".range-popover {"
-    )
-    assert "position: absolute;" in fallback
-    assert "top: 100%;" in fallback
-    assert "left: 0;" in fallback
-    assert "right: 0;" in fallback
+    assert "@supports not (top: anchor(bottom))" not in css
+    assert "position: absolute" not in card
 
     print_block = css[css.index("@media print {") :]
     popover_print = css_block(print_block, "[popover] {")

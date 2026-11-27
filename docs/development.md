@@ -141,7 +141,7 @@ page computes a coordinate, and no template does arithmetic.
   a span of `max(abs(value) * 0.1, 1.0)` so the domain never degenerates. For units whose
   `UNIT_PRECISION` is 0 (`mmHg`, `/min`, `kcal`, `ohm`) `line_chart` calls
   `nice_domain(lo, hi, integer=True)`, which skips the fractional 2.5×10⁰ step candidate in
-  `nice_step`, so the y ticks are whole numbers.
+  `nice_step` and never returns a step below 1, so the y ticks are whole numbers.
 - **Segments, dots, marks and per-point tones.** A line splits into `segments` wherever
   consecutive x differ by more than `max_gap` (x is days from the range start) or a y is
   `None`; a single-point segment still produces a dot. `dots_all` on a line draws a dot per
@@ -156,15 +156,20 @@ page computes a coordinate, and no template does arithmetic.
   `dot-latest` on the emphasised last dot; a 4-tuple `(x, y, tone, title)` also carries a
   human label per point, which becomes that dot's `<title>` (for example
   `25 Nov 2026 08:00 — Systolic 141 mmHg`). Every drawn line carries its label as `title`,
-  rendered as a `<title>` inside each `<polyline>`, so hovering the line names the series, and
-  every dot and mark gets `tabindex="0"` so keyboard users can focus it and read the same
-  title. A line may carry `marks` — outlier readings —
+  rendered as a `<title>` inside each `<polyline>`, so hovering the line names the series. The
+  `<svg>` itself is the single tab stop (`tabindex="0"`, it already carries the `aria-label`);
+  dots and marks carry no tabindex — `chart-tips.js` moves an internal active point across the
+  markers with the arrow keys (Home/End jump to the ends) and marks it with
+  `.chart-point-active`. A line may carry `marks` — outlier readings —
   rendered as `chart-dot … outlier` circles with a `<title>`. The blood-pressure category
   thresholds are data in `records/models.py` (`REFERENCE_BANDS`), never hex in Python, and each
   band also carries a `tone` class (`cat-elevated` / `cat-stage1` / `cat-danger`, with `cat-ok`
   below 120) that `_reference_tone`, `_diastolic_tone` and the category legend use for the dot
   and legend-swatch fills, so all four AHA categories are visually distinct; dots get a thin
-  surface-coloured halo stroke so the fill reads clearly. The
+  surface-coloured halo stroke so the fill reads clearly. Systolic and diastolic are paired by
+  timestamp and both dots of a reading get the higher category (`_category_rank` +
+  `RANK_TONES`), with the pair and category name in the dot's `<title>` (`141/92 mmHg —
+  Stage 2`); single-component readings fall back to their own value's band. The
   y domain derives from the data (and any explicit `y_min`/`y_max`) alone, so colouring a
   point never moves the axis.
 - Geometry is pure Python and stays finite: coordinates are rounded to two decimals, and a
@@ -198,16 +203,21 @@ page computes a coordinate, and no template does arithmetic.
   line chart renders all polylines in a `<g class="chart-lines">` first and every dot and mark in
   a separate `<g class="chart-dots">` after it, with `pointer-events: all` on `.chart-dot`, so at
   line crossings the dots always win pointer events over the strokes and the tooltip fires on
-  the dot, not the line.
+  the dot, not the line. Average-line markers (`.chart-dot.avg`) set `pointer-events: none`,
+  so a lone rolling-average marker at the same coordinates as a reading never swallows its
+  hover.
 - The card builders (`_blood_pressure_card`, `_weight_card`, `_composition_card`,
   `_consistency_card`, `_weekly_card`, `_weekday_card`, `_extremes_card`) sit on top of those
-  two functions. `_rolling_average(points)` averages, for every reading day, the trailing
-  7-day window of available points, so an `avg` line starts at the first reading and only
-  breaks where `max_gap` splits it. `_consistency_card` grids the resolved range
-  (`resolved["start"]` to `resolved["end"]`), so the range pills and a custom window reshape
-  the heatmap; `HEATMAP_DAYS` remains only as the lower bound in `_fetch_window`, so the DB
-  fetch always covers the whole resolved range, including `all` (where `start` is the
-  earliest reading). The consistency page stacks the heatmap card
+  two functions. `_rolling_average(points)` is a single pass: points are grouped by day, sorted
+  once, and a `deque` with a running sum keeps the trailing 7-day window, averaging every
+  reading day from the first one on; an `avg` line only breaks where `max_gap` splits it.
+  `_consistency_card` grids the resolved range, but clamps the grid to `MAX_HEATMAP_COLUMNS`
+  (54) week columns — the most recent 378 days — and flags `clamped` so the card head can say
+  so; `HEATMAP_DAYS` remains only as the lower bound in `_fetch_window`, so the DB fetch always
+  covers the whole resolved range, including `all` (where `start` is the earliest reading).
+  Date arithmetic that can approach `date.min` (`resolve_range`'s previous-window subtraction,
+  `_bucket_start`, `_fetch_window`, the heatmap clamp) goes through `_days_before`, which
+  clamps to `date.min` instead of raising `OverflowError`. The consistency page stacks the heatmap card
   (`_consistency_card`, full width like the blood-pressure and weight pages, with a heading
   row above the grid labeling week columns by their week-start date, thinned to every
   `step`-th column (`step = max(1, ceil(columns / 8))`, forced to at least 2 on grids of six
@@ -232,8 +242,11 @@ page computes a coordinate, and no template does arithmetic.
   (invalid ones become `None`); `resolve_range` resolves them: `custom` uses `from`/`to` as
   the window, clamps the end to today, falls back to `DEFAULT_RANGE` when they are missing,
   invalid or reversed, and gives the KPI delta the equal-length window immediately before
-  `from`; `RANGE_DAYS` drives the day-based keys and `RANGE_VERSUS` words the KPI
-  "previous …" comparisons; the range options (`RANGE_KEYS`, `7d` first, `custom` last) come
+  `from` (the previous-window subtraction is guarded by `_days_before`, so a `from` near
+  `date.min` cannot raise `OverflowError`); the 7-day KPI lookbacks are clamped to their own
+  periods (`seven_start = max(start, end − 6)` and the mirror for the previous window), so a
+  1-day custom range compares disjoint days; `RANGE_DAYS` drives the day-based keys and
+  `RANGE_VERSUS` words the KPI "previous …" comparisons; the range options (`RANGE_KEYS`, `7d` first, `custom` last) come
   with `custom_from`/`custom_to`/`query_metric` for the shared toolbar partial
   (`templates/partials/dashboard_toolbar.html`, included by all five dashboard templates:
   the range pills, where Custom is a `popovertarget` button that opens the
@@ -242,8 +255,9 @@ page computes a coordinate, and no template does arithmetic.
   opened at the full width of the toolbar bar and aligned under it (the toolbar carries
   `anchor-name: --dash-toolbar` and the popover anchors to it with `top: anchor(bottom)` and
   `left: anchor(left)` plus `inline-size: anchor-size(inline)`, so the explicit width makes
-  it stretch exactly to the bar width while staying aligned under its left edge, with an
-  absolute-positioned full-width fallback). The popover is elevated with a layered
+  it stretch exactly to the bar width while staying aligned under its left edge; browsers
+  without anchor positioning keep the UA-centered popover, so no fallback repositions it). The
+  popover is elevated with a layered
   `box-shadow: var(--shadow), var(--shadow-pop)` — `--shadow-pop` is a stronger shadow in the
   light and both dark palettes and `none` in print — and while it is open the Custom button
   takes the `.is-current` look via
@@ -270,7 +284,12 @@ page computes a coordinate, and no template does arithmetic.
   special-cased to the blood-pressure panel page, and `body_weight` gets a second,
   `series-2 avg` 7-day-average line with a legend and an `average` column) assemble the whole
   page context without a request object, so a page test and a shell check can call them
-  directly.
+  directly. The overview's `build_dashboards` stays light: it computes only the KPI cards, the
+  section summary cards (from the in-window latest BP pair and latest weight) and the extremes
+  list — no chart dicts. `last_reading_days` is measured against the real `today`, not the
+  range end, so a historical custom range reports the true age. The composition card's
+  `links`/`rows_url` point at `/readings/?metric=…&from=…&to=…` — the paginated readings view
+  filtered to the metric and the resolved window — not the 500-row-capped drill-down.
 
 `tests/test_reports.py` renders the partial with `render_to_string` and asserts the key set,
 the finite coordinates, the domain rules (a 131–132 kg series stays inside 126–136, a flat
@@ -285,8 +304,9 @@ category legend and the latest category, the weight page and the weight drill-do
 7-day average
 line and column, the composition card with its combined body-fat and skeletal-muscle chart
 and its per-series 7-day average lines (or one other metric at a time, with its own average
-line) and its domain, the hover `<title>`s on every dot, line and bar plus the dots'
-`tabindex="0"`, the scroll script loaded on all five dashboard pages, the table
+line) and its domain, the hover `<title>`s on every dot, line and bar plus one tab stop per
+chart with arrow-key point navigation, the scroll and chart-tip scripts loaded on all five
+dashboard pages, the table
 caps, the full-width heatmap card with its thinned week headings and the side-by-side
 weekly and weekday bar cards on the consistency page (also for a custom
 window), the heatmap reshaping with the selected range, the heatmap's hidden summary, the rolling average starting at the first reading day, a single-point line

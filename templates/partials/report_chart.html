@@ -1,4 +1,4 @@
-<svg class="chart chart-{{ chart.kind }}" viewBox="0 0 {{ chart.width }} {{ chart.height }}" role="img" aria-label="{{ chart.aria_label }}" preserveAspectRatio="xMidYMid meet">
+<svg class="chart chart-{{ chart.kind }}" viewBox="0 0 {{ chart.width }} {{ chart.height }}" role="img" aria-label="{{ chart.aria_label }}" tabindex="0" preserveAspectRatio="xMidYMid meet">
   <g class="chart-grid" aria-hidden="true">
     {% for tick in chart.ticks %}
     <line class="chart-gridline" x1="{{ chart.left }}" y1="{{ tick.y }}" x2="{{ chart.right_edge }}" y2="{{ tick.y }}"></line>
@@ -28,15 +28,15 @@
     {% for line in chart.lines %}
     {% for dot in line.dots %}
     {% if "series-3" in line.class %}
-    <polygon class="chart-dot {{ line.class }}{% if dot.class %} {{ dot.class }}{% endif %}" points="{{ dot.points }}" tabindex="0">{% if dot.title %}<title>{{ dot.title }}</title>{% endif %}</polygon>
+    <polygon class="chart-dot {{ line.class }}{% if dot.class %} {{ dot.class }}{% endif %}" points="{{ dot.points }}">{% if dot.title %}<title>{{ dot.title }}</title>{% endif %}</polygon>
     {% elif "series-2" in line.class or "series-4" in line.class %}
-    <rect class="chart-dot {{ line.class }}{% if dot.class %} {{ dot.class }}{% endif %}" x="{{ dot.x }}" y="{{ dot.y }}" width="{{ dot.width }}" height="{{ dot.height }}" tabindex="0">{% if dot.title %}<title>{{ dot.title }}</title>{% endif %}</rect>
+    <rect class="chart-dot {{ line.class }}{% if dot.class %} {{ dot.class }}{% endif %}" x="{{ dot.x }}" y="{{ dot.y }}" width="{{ dot.width }}" height="{{ dot.height }}">{% if dot.title %}<title>{{ dot.title }}</title>{% endif %}</rect>
     {% else %}
-    <circle class="chart-dot {{ line.class }}{% if dot.class %} {{ dot.class }}{% endif %}" cx="{{ dot.x }}" cy="{{ dot.y }}" r="3" tabindex="0">{% if dot.title %}<title>{{ dot.title }}</title>{% endif %}</circle>
+    <circle class="chart-dot {{ line.class }}{% if dot.class %} {{ dot.class }}{% endif %}" cx="{{ dot.x }}" cy="{{ dot.y }}" r="3">{% if dot.title %}<title>{{ dot.title }}</title>{% endif %}</circle>
     {% endif %}
     {% endfor %}
     {% for mark in line.marks %}
-    <circle class="chart-dot {{ mark.class }} outlier" cx="{{ mark.x }}" cy="{{ mark.y }}" r="4" tabindex="0">
+    <circle class="chart-dot {{ mark.class }} outlier" cx="{{ mark.x }}" cy="{{ mark.y }}" r="4">
       <title>{{ mark.title }}</title>
     </circle>
     {% endfor %}

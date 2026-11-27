@@ -38,7 +38,7 @@
 <section class="card report-card">
     <div class="card-head">
       <h2>Consistency</h2>
-      <span class="muted small">{{ consistency.window_label }} · {{ consistency.days }} day{{ consistency.days|pluralize }} with readings · {{ consistency.readings }} reading{{ consistency.readings|pluralize }}</span>
+      <span class="muted small">{{ consistency.window_label }} · {{ consistency.days }} day{{ consistency.days|pluralize }} with readings · {{ consistency.readings }} reading{{ consistency.readings|pluralize }}{% if consistency.clamped %} · capped to the most recent {{ consistency.clamped_days }} days{% endif %}</span>
     </div>
     <p class="visually-hidden">Heatmap of {{ consistency.window_label }}: {{ consistency.days }} days with readings, {{ consistency.readings }} readings in total. The table below lists each day.</p>
     <div class="heatmap-scroll" tabindex="0" role="group" aria-label="Readings per day for {{ consistency.window_label }}">
