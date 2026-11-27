@@ -139,9 +139,9 @@ query parameter with a 422 rather than ignoring it.
 
 `healthz` never touches the database, so it answers even while the database is broken; that
 makes it the liveness probe. `readyz` opens the database with `SELECT 1` and compares the
-applied migrations against the code, so a restored-but-unreadable database or a pending
-migration turns the container unhealthy instead of leaving every other page to fail with a
-500.
+applied migrations against the code. For SQLite files, it also reports a missing prerequisite
+even if the migration that depends on it is recorded as applied. An unreadable database or a
+missing migration turns the container unhealthy.
 
 ### `level` and `include`
 
