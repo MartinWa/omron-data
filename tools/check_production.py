@@ -27,6 +27,16 @@ def check_debug(settings) -> list[str]:
     return []
 
 
+def check_trusted_proxy(settings) -> list[str]:
+    if settings.DEBUG or settings.OMRON_TRUSTED_PROXY:
+        return []
+    return [
+        "OMRON_TRUSTED_PROXY is empty while OMRON_DEBUG is false; the Secure session and "
+        "CSRF cookies then require a TLS proxy, and without a declared peer every browser "
+        "login fails the CSRF origin check."
+    ]
+
+
 def check_secret(settings) -> list[str]:
     secret = settings.SECRET_KEY or ""
     if not secret.strip() or secret in PLACEHOLDER_SECRET_KEYS:
@@ -71,7 +81,12 @@ def check_migrations() -> list[str]:
 def collect() -> list[str]:
     from django.conf import settings
 
-    problems = check_debug(settings) + check_secret(settings) + check_database(settings)
+    problems = (
+        check_debug(settings)
+        + check_trusted_proxy(settings)
+        + check_secret(settings)
+        + check_database(settings)
+    )
     if problems:
         return problems
     return check_migrations()
@@ -95,8 +110,8 @@ def main() -> int:
             print(f"  {problem}", file=sys.stderr)
         return 1
     print(
-        "Production check passed: DEBUG off, a private secret, a writable database and applied "
-        "migrations."
+        "Production check passed: DEBUG off, a declared trusted proxy, a private secret, a "
+        "writable database and applied migrations."
     )
     return 0
 

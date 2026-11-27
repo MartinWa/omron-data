@@ -15,6 +15,7 @@ def test_every_success_body_carries_the_envelope(auth):
     paths = (
         "/api/v1/",
         "/api/v1/healthz",
+        "/api/v1/readyz",
         "/api/v1/metrics",
         "/api/v1/measurements",
         "/api/v1/summary",
@@ -157,6 +158,52 @@ def test_healthz_answers_without_a_token_and_carries_the_envelope(db):
     assert response.status_code == 200
     body = response.json()
     assert body["status"] == "ok"
+    assert ENVELOPE.issubset(body)
+
+
+def test_readyz_answers_without_a_token_when_the_database_is_migrated(db):
+    response = Client().get("/api/v1/readyz")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "ok"
+    assert ENVELOPE.issubset(body)
+
+
+def test_readyz_answers_503_with_the_envelope_when_migrations_are_pending(db, monkeypatch):
+    from types import SimpleNamespace
+
+    from django.db.migrations.executor import MigrationExecutor
+
+    pending = [(SimpleNamespace(app_label="records", name="0005_future"), False)]
+    monkeypatch.setattr(MigrationExecutor, "migration_plan", lambda self, targets: pending)
+
+    response = Client().get("/api/v1/readyz")
+
+    assert response.status_code == 503
+    body = response.json()
+    assert body["error"]["code"] == "service_unavailable"
+    assert "records.0005_future" in body["error"]["message"]
+    assert ENVELOPE.issubset(body)
+
+
+def test_readyz_answers_503_with_the_envelope_when_the_database_is_unreadable(db, monkeypatch):
+    from django.db import OperationalError
+
+    import records.routers.meta as meta
+
+    class BrokenConnection:
+        def cursor(self):
+            raise OperationalError("disk I/O error")
+
+    monkeypatch.setattr(meta, "connection", BrokenConnection())
+
+    response = Client().get("/api/v1/readyz")
+
+    assert response.status_code == 503
+    body = response.json()
+    assert body["error"]["code"] == "service_unavailable"
+    assert "disk I/O error" in body["error"]["message"]
     assert ENVELOPE.issubset(body)
 
 
@@ -369,6 +416,7 @@ def test_the_openapi_schema_documents_the_error_responses(auth):
     assert "401" in responses
     assert "ErrorOut" in schema["components"]["schemas"]
     assert "401" not in schema["paths"]["/api/v1/healthz"]["get"]["responses"]
+    assert "401" not in schema["paths"]["/api/v1/readyz"]["get"]["responses"]
 
 
 def test_the_api_base_url_without_a_slash_is_refused_with_the_envelope(auth):
