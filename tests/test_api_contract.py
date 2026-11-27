@@ -170,7 +170,8 @@ def test_readyz_answers_without_a_token_when_the_database_is_migrated(db):
     assert ENVELOPE.issubset(body)
 
 
-def test_readyz_answers_503_with_the_envelope_when_migrations_are_pending(db, monkeypatch):
+def test_readyz_answers_503_with_the_envelope_when_migrations_are_pending(db, monkeypatch, caplog):
+    import logging
     from types import SimpleNamespace
 
     from django.db.migrations.executor import MigrationExecutor
@@ -178,33 +179,68 @@ def test_readyz_answers_503_with_the_envelope_when_migrations_are_pending(db, mo
     pending = [(SimpleNamespace(app_label="records", name="0005_future"), False)]
     monkeypatch.setattr(MigrationExecutor, "migration_plan", lambda self, targets: pending)
 
-    response = Client().get("/api/v1/readyz")
+    with caplog.at_level(logging.ERROR, logger="django"):
+        response = Client().get("/api/v1/readyz")
 
     assert response.status_code == 503
     body = response.json()
     assert body["error"]["code"] == "service_unavailable"
-    assert "records.0005_future" in body["error"]["message"]
+    assert body["error"]["message"] == "Service temporarily unavailable"
+    assert "0005_future" not in response.content.decode()
     assert ENVELOPE.issubset(body)
+    assert any("records.0005_future" in record.getMessage() for record in caplog.records)
 
 
-def test_readyz_answers_503_with_the_envelope_when_the_database_is_unreadable(db, monkeypatch):
+def test_readyz_answers_503_with_the_envelope_when_the_database_is_unreadable(
+    db, monkeypatch, caplog
+):
+    import logging
+
     from django.db import OperationalError
 
     import records.routers.meta as meta
 
     class BrokenConnection:
+        settings_dict = {"NAME": ":memory:", "ENGINE": "django.db.backends.sqlite3"}
+
         def cursor(self):
             raise OperationalError("disk I/O error")
 
     monkeypatch.setattr(meta, "connection", BrokenConnection())
 
-    response = Client().get("/api/v1/readyz")
+    with caplog.at_level(logging.ERROR, logger="django"):
+        response = Client().get("/api/v1/readyz")
 
     assert response.status_code == 503
     body = response.json()
     assert body["error"]["code"] == "service_unavailable"
-    assert "disk I/O error" in body["error"]["message"]
+    assert body["error"]["message"] == "Service temporarily unavailable"
+    assert "disk I/O error" not in response.content.decode()
     assert ENVELOPE.issubset(body)
+    assert any(
+        "Readiness check failed" in record.getMessage() and record.exc_info
+        for record in caplog.records
+    )
+
+
+def test_readyz_refuses_a_missing_database_file_without_creating_it(db, monkeypatch, tmp_path):
+    import records.routers.meta as meta
+
+    missing = tmp_path / "gone.sqlite3"
+
+    class MissingConnection:
+        settings_dict = {
+            "NAME": str(missing),
+            "ENGINE": "django.db.backends.sqlite3",
+        }
+
+    monkeypatch.setattr(meta, "connection", MissingConnection())
+
+    response = Client().get("/api/v1/readyz")
+
+    assert response.status_code == 503
+    assert response.json()["error"]["message"] == "Service temporarily unavailable"
+    assert not missing.exists()
 
 
 def test_metrics_matches_the_registry_with_units_and_kinds(auth):

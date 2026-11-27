@@ -277,10 +277,13 @@ to `staticfiles/` unless `OMRON_STATIC_ROOT` says otherwise:
 
 ```sh
 uv run python manage.py collectstatic --noinput
+export OMRON_DEBUG=true
 uv run python -m tools.serve
 ```
 
-Without it the pages render unstyled, because the stylesheet is not where the server looks
+A working copy serves plain HTTP directly, so run it with `OMRON_DEBUG=true`; with debug off
+the server refuses to start without `OMRON_TRUSTED_PROXY`, which only a reverse proxy can
+provide. Without it the pages render unstyled, because the stylesheet is not where the server looks
 for it. WhiteNoise reads the directory once at startup, so re-run `collectstatic` and
 restart the server after changing an asset. `staticfiles/` is gitignored, so a collected
 asset cannot end up in a commit.

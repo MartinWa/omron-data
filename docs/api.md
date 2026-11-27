@@ -76,8 +76,9 @@ there is nothing more to say, a list of offending parameter names when there is:
 | 503 | `service_unavailable` |
 
 `500` is what an unexpected failure returns, with the traceback in the server log and not
-in the body. `403` and `503` are defined for a permission check and a transient condition
-that no endpoint produces today.
+in the body. `403` is defined for a permission check. `503` is what `GET /api/v1/readyz`
+returns while the database cannot be opened or migrations are pending; like the `500`, the
+specific reason is logged server-side and never sent in the body.
 
 Every response, including every refusal, sets `Cache-Control: no-store`.
 

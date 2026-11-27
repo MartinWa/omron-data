@@ -128,6 +128,7 @@ uv run python manage.py migrate
 uv run python manage.py import_omron /path/to/exports --owner alice --create-user --dry-run
 uv run python manage.py make_token --owner alice --name laptop
 uv run python manage.py collectstatic --noinput
+export OMRON_DEBUG=true
 uv run python -m tools.serve
 ```
 
@@ -138,7 +139,10 @@ re-run `collectstatic` and restart after changing an asset. The image bakes the 
 at build time, which is why a container never needs this step.
 
 `OMRON_SECRET_KEY` has no default outside `OMRON_DEBUG=1`: a process that forgot it refuses
-to start instead of serving with a published key. Set `OMRON_ALLOWED_HOSTS` too;
+to start instead of serving with a published key. A local run served straight over HTTP also
+needs `OMRON_DEBUG=true`: with debug off the session and CSRF cookies are `Secure`, so the
+server requires `OMRON_TRUSTED_PROXY` behind a TLS proxy and refuses to start without it.
+Set `OMRON_ALLOWED_HOSTS` too;
 `OMRON_DB_PATH` overrides the database location (default `.data/db.sqlite3`) and
 `OMRON_TIME_ZONE` sets the zone the export's wall clocks are read in (default
 `Europe/Stockholm`).
