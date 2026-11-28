@@ -13,6 +13,7 @@ ENVIRONMENT_KEYS = (
     "OMRON_SECRET_KEY_FILE",
     "OMRON_ALLOWED_HOSTS",
     "OMRON_CSRF_TRUSTED_ORIGINS",
+    "OMRON_TRUSTED_PROXY",
     "OMRON_TIME_ZONE",
     "OMRON_STATIC_ROOT",
     "OMRON_VERSION",
@@ -259,15 +260,102 @@ def test_the_module_installs_the_admin():
     assert "django.contrib.admin" in settings_module.INSTALLED_APPS
 
 
-def test_the_api_middleware_runs_first():
-    assert settings_module.MIDDLEWARE[0] == "records.middleware.ApiResponseMiddleware"
-
-
-def test_whitenoise_runs_right_after_security_and_before_common():
+def test_security_runs_first_and_axes_runs_last():
     stack = settings_module.MIDDLEWARE
-    security = stack.index("django.middleware.security.SecurityMiddleware")
-    whitenoise = stack.index("whitenoise.middleware.WhiteNoiseMiddleware")
-    common = stack.index("django.middleware.common.CommonMiddleware")
 
-    assert stack[security + 1] == "whitenoise.middleware.WhiteNoiseMiddleware"
-    assert whitenoise < common
+    assert stack[0] == "django.middleware.security.SecurityMiddleware"
+    assert stack[-1] == "axes.middleware.AxesMiddleware"
+
+
+def test_the_security_headers_run_before_the_responses_they_decorate():
+    stack = settings_module.MIDDLEWARE
+
+    assert stack.index("omron_data.middleware.ContentSecurityPolicyMiddleware") < stack.index(
+        "records.middleware.ApiResponseMiddleware"
+    )
+    assert stack.index("records.middleware.ApiResponseMiddleware") < stack.index(
+        "whitenoise.middleware.WhiteNoiseMiddleware"
+    )
+    assert stack.index("whitenoise.middleware.WhiteNoiseMiddleware") < stack.index(
+        "django.middleware.common.CommonMiddleware"
+    )
+
+
+def test_the_module_uses_the_axes_backend_before_the_model_backend():
+    assert settings_module.AUTHENTICATION_BACKENDS == [
+        "axes.backends.AxesStandaloneBackend",
+        "django.contrib.auth.backends.ModelBackend",
+    ]
+
+
+def test_the_login_lockout_is_configured_on_the_username_and_the_client_address():
+    assert settings_module.AXES_ENABLED is True
+    assert settings_module.AXES_FAILURE_LIMIT == 5
+    assert settings_module.AXES_LOCKOUT_PARAMETERS == [["username", "ip_address"]]
+    assert settings_module.AXES_COOLOFF_TIME == 1
+    assert settings_module.AXES_RESET_ON_SUCCESS is True
+
+
+def test_a_retry_during_a_lockout_neither_extends_it_nor_is_recorded_per_attempt():
+    assert settings_module.AXES_RESET_COOL_OFF_ON_FAILURE_DURING_LOCKOUT is False
+    assert settings_module.AXES_ENABLE_ACCESS_FAILURE_LOG is False
+    assert settings_module.AXES_DISABLE_ACCESS_LOG is True
+    assert not hasattr(settings_module, "AXES_IPWARE_META_PRECEDENCE_ORDER")
+
+
+def test_axes_logs_on_its_own_console_logger():
+    logger = settings_module.LOGGING["loggers"]["axes"]
+
+    assert logger == {"handlers": ["console"], "level": "INFO", "propagate": False}
+    assert settings_module.LOGGING["handlers"]["console"] == {"class": "logging.StreamHandler"}
+
+
+def test_a_wildcard_allowed_host_is_refused(monkeypatch):
+    with pytest.raises(ImproperlyConfigured, match="OMRON_ALLOWED_HOSTS must name"):
+        reload_settings(monkeypatch, {"OMRON_SECRET_KEY": REAL_KEY, "OMRON_ALLOWED_HOSTS": "*"})
+
+
+def test_a_wildcard_hidden_in_a_list_is_refused(monkeypatch):
+    with pytest.raises(ImproperlyConfigured, match="OMRON_ALLOWED_HOSTS must name"):
+        reload_settings(
+            monkeypatch,
+            {"OMRON_SECRET_KEY": REAL_KEY, "OMRON_ALLOWED_HOSTS": "omron.test, * ,"},
+        )
+
+
+def test_a_plain_http_csrf_origin_is_refused(monkeypatch):
+    with pytest.raises(ImproperlyConfigured, match="must start with https://"):
+        reload_settings(
+            monkeypatch,
+            {"OMRON_SECRET_KEY": REAL_KEY, "OMRON_CSRF_TRUSTED_ORIGINS": "http://omron.test"},
+        )
+
+
+def test_a_padded_origin_is_stripped_before_the_scheme_is_checked(monkeypatch):
+    module = reload_settings(
+        monkeypatch,
+        {"OMRON_SECRET_KEY": REAL_KEY, "OMRON_CSRF_TRUSTED_ORIGINS": " https://omron.test , "},
+    )
+
+    assert module.CSRF_TRUSTED_ORIGINS == ["https://omron.test"]
+
+
+def test_the_default_hosts_and_no_origins_pass_the_validator(monkeypatch):
+    module = reload_settings(monkeypatch, {"OMRON_SECRET_KEY": REAL_KEY})
+
+    assert module.ALLOWED_HOSTS == ["127.0.0.1", "localhost"]
+    assert module.CSRF_TRUSTED_ORIGINS == []
+
+
+def test_the_forwarded_scheme_is_ignored_without_a_trusted_proxy(monkeypatch):
+    assert (
+        reload_settings(monkeypatch, {"OMRON_SECRET_KEY": REAL_KEY}).SECURE_PROXY_SSL_HEADER is None
+    )
+
+
+def test_a_declared_proxy_makes_the_forwarded_scheme_count(monkeypatch):
+    module = reload_settings(
+        monkeypatch, {"OMRON_SECRET_KEY": REAL_KEY, "OMRON_TRUSTED_PROXY": "*"}
+    )
+
+    assert module.SECURE_PROXY_SSL_HEADER == ("HTTP_X_FORWARDED_PROTO", "https")

@@ -216,7 +216,11 @@ synthetic. Never commit a CSV export, a database or backup file, a token, a `.en
 real hostname, and never paste one into an issue or a pull request.
 [SECURITY.md](SECURITY.md) lists what counts as personal data, and
 `uv run python tools/check_no_private_data.py` — which the test suite runs as well — fails
-when one of them is in the tree.
+when one of them is in the tree, whether it appears as a file name, as a line of text such as
+a bearer token, a cloud key or an absolute host path, or inside a PNG or JPEG's metadata,
+which is read by streaming the file so no size hides it. A symbolic link is reported rather
+than followed, `--staged` runs the same checks over what a commit would contain, and
+`--untracked` covers the files git does not track yet, so a file is caught before it is added.
 
 ## License
 

@@ -2,9 +2,20 @@ import os
 import re
 import subprocess
 import sys
+import time
 from pathlib import Path
 
-from tools.check_no_private_data import candidate_files, content_violations, find_violations
+import pytest
+
+from tools.check_no_private_data import (
+    MAX_SCAN_BYTES,
+    PNG_SIGNATURE,
+    candidate_files,
+    content_violations,
+    find_violations,
+    main,
+    untracked_paths,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -290,6 +301,17 @@ def test_image_is_multi_stage_and_needs_no_pip_at_runtime():
     assert dockerfile.rstrip().endswith('CMD ["python", "-m", "tools.serve"]')
 
 
+def test_a_release_builds_from_scratch_so_its_os_packages_are_current():
+    release = read(".github/workflows/release.yml")
+    continuous = read(".github/workflows/ci.yml")
+
+    assert release.count("no-cache: true") == release.count("docker/build-push-action")
+    assert "no-cache: true" not in continuous
+    for text in (release, continuous, read("Dockerfile")):
+        assert "OS_PACKAGE_DATE" not in text
+        assert "os-package-date" not in text
+
+
 def test_operational_tools_use_the_standard_library_only():
     healthcheck = read("tools/healthcheck.py")
     serve = read("tools/serve.py")
@@ -386,3 +408,386 @@ def test_private_data_scan_passes_on_this_tree():
 
     assert find_violations(files) == []
     assert content_violations(files) == []
+
+
+def test_private_data_scan_flags_cloud_and_chat_tokens(tmp_path):
+    sample = tmp_path / "notes.md"
+    aws = "AKIA" + "IOSFODNN7EXAMPLE"
+    github = "ghp_" + "a" * 36
+    slack = "xoxb-" + "123456789012-abcdefgh"
+    assigned = "password" + ' = "' + "a" * 32 + '"'
+    sample.write_text(f"{aws}\n{github}\n{slack}\n{assigned}\n", encoding="utf-8")
+
+    assert content_violations([str(sample)]) == [
+        f"{sample}:1: AWS access key",
+        f"{sample}:2: GitHub token",
+        f"{sample}:3: Slack token",
+        f"{sample}:4: assigned secret",
+    ]
+
+
+def test_private_data_scan_flags_the_host_paths_of_a_server(tmp_path):
+    sample = tmp_path / "notes.md"
+    roots = ("root", "srv", "mnt")
+    sample.write_text("".join(f"/{name}/exports\n" for name in roots), encoding="utf-8")
+
+    assert content_violations([str(sample)]) == [
+        f"{sample}:{number}: absolute host path" for number in (1, 2, 3)
+    ]
+
+
+def png_chunk(kind: bytes, data: bytes) -> bytes:
+    return len(data).to_bytes(4, "big") + kind + data + b"\x00\x00\x00\x00"
+
+
+def test_private_data_scan_flags_image_metadata(tmp_path):
+    png = tmp_path / "photo.png"
+    png.write_bytes(
+        PNG_SIGNATURE + png_chunk(b"tEXt", b"Comment\x00synthetic") + png_chunk(b"IEND", b"")
+    )
+    jpeg = tmp_path / "photo.jpg"
+    jpeg.write_bytes(b"\xff\xd8\xff\xe1" + b"Exif\x00\x00" + b"\xff\xd9")
+
+    assert content_violations([str(png), str(jpeg)]) == [
+        f"{png}: PNG tEXt metadata chunk",
+        f"{jpeg}: JPEG Exif metadata",
+    ]
+
+
+def git_init(directory: Path) -> None:
+    subprocess.run(["git", "init", "-q"], cwd=directory, check=True)  # noqa: S607
+
+
+def commit_all(directory: Path) -> None:
+    subprocess.run(["git", "add", "-A"], cwd=directory, check=True)  # noqa: S607
+    subprocess.run(  # noqa: S603
+        [  # noqa: S607
+            "git",
+            "-c",
+            "user.email=nobody@example.com",
+            "-c",
+            "user.name=Hygiene Check",
+            "commit",
+            "-q",
+            "-m",
+            "fixture",
+        ],
+        cwd=directory,
+        check=True,
+    )
+
+
+def test_the_untracked_scan_lists_only_files_git_does_not_ignore(tmp_path, monkeypatch):
+    git_init(tmp_path)
+    (tmp_path / ".gitignore").write_text("*.csv\n", encoding="utf-8")
+    (tmp_path / "notes.md").write_text("readings\n", encoding="utf-8")
+    (tmp_path / "export.csv").write_text("time,pulse\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    assert sorted(untracked_paths()) == [".gitignore", "notes.md"]
+
+
+def test_the_untracked_scan_reuses_the_name_and_content_checks(tmp_path, monkeypatch):
+    git_init(tmp_path)
+    (tmp_path / "laptop-token.txt").write_text("a synthetic secret\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    assert main(["--untracked"]) == 1
+
+
+def test_the_default_scan_walks_the_working_tree(tmp_path, monkeypatch):
+    (tmp_path / "state.db").write_text("", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    assert main([]) == 1
+
+
+def test_a_committed_pdf_is_refused_by_name():
+    assert find_violations(["invoice.pdf", "docs/report.PDF"]) == [
+        "docs/report.PDF",
+        "invoice.pdf",
+    ]
+
+
+def test_an_image_above_the_read_limit_is_still_inspected(tmp_path):
+    png = tmp_path / "huge.png"
+    png.write_bytes(
+        PNG_SIGNATURE
+        + png_chunk(b"prVt", b"\x00" * (MAX_SCAN_BYTES + 1))
+        + png_chunk(b"tEXt", b"Comment\x00synthetic")
+        + png_chunk(b"IEND", b"")
+    )
+
+    assert content_violations([str(png)]) == [f"{png}: PNG tEXt metadata chunk"]
+
+
+def test_a_large_jpeg_is_streamed_to_its_exif_marker(tmp_path):
+    jpeg = tmp_path / "huge.jpg"
+    jpeg.write_bytes(b"\xff\xd8" + b"\x00" * (MAX_SCAN_BYTES + 1) + b"Exif\x00\x00" + b"\xff\xd9")
+
+    assert content_violations([str(jpeg)]) == [f"{jpeg}: JPEG Exif metadata"]
+
+
+def test_text_beyond_two_megabytes_is_still_scanned(tmp_path):
+    notes = tmp_path / "notes.md"
+    email = "real.person" + "@" + "corp.example"
+    filler = "readings\n" * (MAX_SCAN_BYTES // 8)
+    notes.write_text(filler + f"contact {email}\n", encoding="utf-8")
+
+    assert content_violations([str(notes)]) == [
+        f"{notes}:{filler.count(chr(10)) + 1}: email address"
+    ]
+
+
+def test_an_over_long_line_is_reported_instead_of_dropped(tmp_path):
+    notes = tmp_path / "notes.md"
+    notes.write_text("x" * (MAX_SCAN_BYTES + 1) + "\n", encoding="utf-8")
+
+    assert content_violations([str(notes)]) == [
+        f"{notes}:1: line longer than {MAX_SCAN_BYTES} bytes, not scanned"
+    ]
+
+
+def test_an_image_that_cannot_be_inspected_is_reported(tmp_path):
+    broken = tmp_path / "broken.png"
+    broken.write_bytes(b"not a png at all")
+
+    assert content_violations([str(broken)]) == [f"{broken}: image metadata not inspectable"]
+
+
+def test_the_scan_never_follows_a_symlink(tmp_path):
+    email = "real.person" + "@" + "corp.example"
+    secret = tmp_path / "private.txt"
+    secret.write_text(f"contact {email}\n", encoding="utf-8")
+    link = tmp_path / "notes.md"
+    try:
+        link.symlink_to(secret)
+    except OSError, NotImplementedError:
+        pytest.skip("this platform cannot create symlinks")
+
+    assert content_violations([str(link)]) == [f"{link}: symbolic link not inspected"]
+
+
+def stage_secret(directory):
+    email = "real.person" + "@" + "corp.example"
+    notes = directory / "notes.md"
+    notes.write_text(f"contact {email}\n", encoding="utf-8")
+    subprocess.run(["git", "add", "notes.md"], cwd=directory, check=True)  # noqa: S607
+    return notes
+
+
+def test_the_staged_scan_catches_content_removed_from_the_working_copy(
+    tmp_path, monkeypatch, capsys
+):
+    git_init(tmp_path)
+    stage_secret(tmp_path).unlink()
+    monkeypatch.chdir(tmp_path)
+
+    assert main(["--staged"]) == 1
+    assert "notes.md:1: email address" in capsys.readouterr().out
+
+
+def test_the_staged_scan_catches_an_edit_that_was_never_staged(tmp_path, monkeypatch, capsys):
+    git_init(tmp_path)
+    stage_secret(tmp_path).write_text("contact nobody@example.com\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    assert main(["--staged"]) == 1
+    assert "notes.md:1: email address" in capsys.readouterr().out
+
+
+def test_the_staged_scan_catches_an_unstaged_secret(tmp_path, monkeypatch, capsys):
+    git_init(tmp_path)
+    notes = tmp_path / "notes.md"
+    notes.write_text("contact nobody@example.com\n", encoding="utf-8")
+    subprocess.run(["git", "add", "notes.md"], cwd=tmp_path, check=True)  # noqa: S607
+    email = "real.person" + "@" + "corp.example"
+    notes.write_text(f"contact {email}\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    assert main(["--staged"]) == 1
+    assert "notes.md:1: email address" in capsys.readouterr().out
+
+
+def test_the_staged_scan_reports_a_staged_symlink(tmp_path, monkeypatch, capsys):
+    git_init(tmp_path)
+    email = "real.person" + "@" + "corp.example"
+    secret = tmp_path / "private.txt"
+    secret.write_text(f"contact {email}\n", encoding="utf-8")
+    link = tmp_path / "notes.md"
+    try:
+        link.symlink_to(secret)
+    except OSError, NotImplementedError:
+        pytest.skip("this platform cannot create symlinks")
+    subprocess.run(["git", "add", "notes.md"], cwd=tmp_path, check=True)  # noqa: S607
+    monkeypatch.chdir(tmp_path)
+
+    assert main(["--staged"]) == 1
+    output = capsys.readouterr().out
+    assert "notes.md: symbolic link not inspected" in output
+    assert "email address" not in output
+
+
+def test_the_staged_scan_needs_a_work_tree(tmp_path, monkeypatch, capsys):
+    (tmp_path / "notes.md").write_text("contact nobody@example.com\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    with pytest.raises(SystemExit) as exit_info:
+        main(["--staged"])
+
+    assert exit_info.value.code == 1
+    assert "needs a git work tree" in capsys.readouterr().err
+
+
+def test_the_default_scan_needs_no_git(tmp_path, monkeypatch):
+    def forbidden(*arguments, **keywords):
+        raise AssertionError("the default scan must not run git")
+
+    (tmp_path / "state.db").write_text("", encoding="utf-8")
+    monkeypatch.setattr("tools.check_no_private_data.subprocess.run", forbidden)
+    monkeypatch.setattr("tools.check_no_private_data.subprocess.Popen", forbidden)
+    monkeypatch.chdir(tmp_path)
+
+    assert main([]) == 1
+
+
+def test_private_data_scan_flags_a_fine_grained_github_token(tmp_path):
+    sample = tmp_path / "notes.md"
+    token = "github" + "_pat_" + "11A" + "b" * 20 + "_" + "c" * 40
+    sample.write_text(f"{token}\n", encoding="utf-8")
+
+    assert content_violations([str(sample)]) == [f"{sample}:1: GitHub token"]
+
+
+def test_the_untracked_scan_fails_clearly_outside_a_work_tree(tmp_path):
+    result = subprocess.run(  # noqa: S603
+        [sys.executable, str(ROOT / "tools" / "check_no_private_data.py"), "--untracked"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 1
+    assert "needs a git work tree" in result.stderr
+    assert "Traceback" not in result.stderr
+
+
+def test_the_untracked_scan_fails_clearly_without_git(tmp_path, monkeypatch, capsys):
+    def missing_git():
+        raise FileNotFoundError(2, "No such file or directory", "git")
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("tools.check_no_private_data.untracked_paths", missing_git)
+
+    with pytest.raises(SystemExit) as exit_info:
+        main(["--untracked"])
+
+    assert exit_info.value.code == 1
+    assert "needs git" in capsys.readouterr().err
+
+
+def test_an_assigned_secret_is_read_from_the_whole_line(tmp_path):
+    notes = tmp_path / "notes.md"
+    assignment = "password" + ' = "' + "a" * 40 + '"'
+    notes.write_text("readings " * 20000 + assignment + "\n", encoding="utf-8")
+
+    assert content_violations([str(notes)]) == [f"{notes}:1: assigned secret"]
+
+
+def test_a_stray_at_sign_on_a_huge_line_is_rejected_cheaply(tmp_path):
+    notes = tmp_path / "notes.md"
+    notes.write_bytes(b"x" * (MAX_SCAN_BYTES - 64) + b"@\n")
+
+    started = time.monotonic()
+    assert content_violations([str(notes)]) == []
+    assert time.monotonic() - started < 5
+
+
+def test_a_dangling_symlink_is_reported_instead_of_dropped(tmp_path):
+    link = tmp_path / "notes.md"
+    try:
+        link.symlink_to(tmp_path / "gone.txt")
+    except OSError, NotImplementedError:
+        pytest.skip("this platform cannot create symlinks")
+
+    assert content_violations([str(link)]) == [f"{link}: symbolic link not inspected"]
+
+
+def test_the_staged_scan_reports_a_dangling_working_tree_symlink(tmp_path, monkeypatch, capsys):
+    git_init(tmp_path)
+    notes = tmp_path / "notes.md"
+    notes.write_text("readings\n", encoding="utf-8")
+    subprocess.run(["git", "add", "notes.md"], cwd=tmp_path, check=True)  # noqa: S607
+    notes.unlink()
+    try:
+        notes.symlink_to(tmp_path / "gone.txt")
+    except OSError, NotImplementedError:
+        pytest.skip("this platform cannot create symlinks")
+    monkeypatch.chdir(tmp_path)
+
+    assert main(["--staged"]) == 1
+    assert "notes.md: symbolic link not inspected" in capsys.readouterr().out
+
+
+def test_the_staged_scan_catches_an_edit_to_a_committed_file(tmp_path, monkeypatch, capsys):
+    git_init(tmp_path)
+    notes = tmp_path / "notes.md"
+    notes.write_text("contact nobody@example.com\n", encoding="utf-8")
+    commit_all(tmp_path)
+    email = "real.person" + "@" + "corp.example"
+    notes.write_text(f"contact {email}\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    assert main(["--staged"]) == 1
+    assert "notes.md:1: email address" in capsys.readouterr().out
+
+
+def test_the_staged_scan_keeps_the_new_path_of_a_rename(tmp_path, monkeypatch, capsys):
+    git_init(tmp_path)
+    notes = tmp_path / "notes.md"
+    notes.write_text("contact nobody@example.com\n", encoding="utf-8")
+    commit_all(tmp_path)
+    subprocess.run(["git", "mv", "notes.md", "moved.md"], cwd=tmp_path, check=True)  # noqa: S607
+    email = "real.person" + "@" + "corp.example"
+    (tmp_path / "moved.md").write_text(f"contact {email}\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    assert main(["--staged"]) == 1
+    output = capsys.readouterr().out
+    assert "moved.md:1: email address" in output
+    assert "notes.md:1: email address" not in output
+
+
+def test_an_address_ending_a_sentence_is_still_reported(tmp_path):
+    notes = tmp_path / "notes.md"
+    email = "real.person" + "@" + "corp.example"
+    notes.write_text(f"Mail me at {email}.\n", encoding="utf-8")
+
+    assert content_violations([str(notes)]) == [f"{notes}:1: email address"]
+
+
+def test_an_address_followed_by_a_closing_parenthesis_is_still_reported(tmp_path):
+    notes = tmp_path / "notes.md"
+    email = "real.person" + "@" + "corp.example"
+    notes.write_text(f"Mail me (at {email})\n", encoding="utf-8")
+
+    assert content_violations([str(notes)]) == [f"{notes}:1: email address"]
+
+
+def test_only_the_reserved_example_domains_are_exempt(tmp_path):
+    notes = tmp_path / "notes.md"
+    exempt = "nobody" + "@" + "example.com"
+    lookalike = "someone" + "@" + "example.company"
+    notes.write_text(f"{exempt}\n{lookalike}\n", encoding="utf-8")
+
+    assert content_violations([str(notes)]) == [f"{notes}:2: email address"]
+
+
+def test_a_placeholder_assignment_does_not_hide_a_real_one(tmp_path):
+    notes = tmp_path / "notes.md"
+    placeholder = "password" + ' = "' + "your-token-here" + '"'
+    real = "password" + ' = "' + "b" * 40 + '"'
+    notes.write_text(f"{placeholder} {real}\n", encoding="utf-8")
+
+    assert content_violations([str(notes)]) == [f"{notes}:1: assigned secret"]

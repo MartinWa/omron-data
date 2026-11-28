@@ -365,18 +365,44 @@ covers, and its dates identify them.
 
 ## The private-data scan
 
-`uv run python tools/check_no_private_data.py` fails on two kinds of finding:
+`uv run python tools/check_no_private_data.py` walks the working tree and fails on three
+kinds of finding:
 
-- by name: a `.csv`, `.sqlite3`, `.db`, `.dump`, `.sql`, archive or key file, `.env` other
-  than `.env.example`, a `tokens.*` file, and anything under `planning/` or `reference/`
-- by content, in any file under 2 MB: a bearer token, a private key block, an e-mail address
-  outside `example.com`, and an absolute host path such as a home directory
+- by name: a `.csv`, `.sqlite3`, `.db`, `.dump`, `.sql`, `.pdf`, archive or key file, `.env`
+  other than `.env.example`, a `tokens.*` file, and anything under `planning/` or
+  `reference/`
+- by text, streamed line by line with no file-size cutoff: a bearer token, a private key
+  block, an AWS access key, a classic or fine-grained GitHub token, a Slack token, an assigned
+  secret such as `password = "..."`, an e-mail address whose domain is not exactly one of the
+  reserved `example.com`, `example.org` or `example.net` (trailing sentence punctuation is
+  trimmed first, so an address ending a sentence still counts), and an absolute host path such
+  as a home directory, `/root`, `/srv` or `/mnt`. A single line above 2 MB is reported as
+  unscannable rather than silently dropped
+- inside an image of any size: a PNG `tEXt`, `iTXt`, `zTXt` or `eXIf` chunk, or JPEG Exif
+  metadata, read by streaming the file rather than loading it, so size cannot hide metadata.
+  A screenshot carries the host name of the machine it was taken on even when the pixels
+  themselves are harmless, and an image that cannot be read is reported rather than passed
+- a symbolic link: it is reported, never followed, so a link cannot pull an ignored or
+  out-of-tree file into the scan
+
+That is the default mode, the one CI runs: it walks the working tree and needs no git at all.
+
+Two flags cover what a walk cannot see. `--staged` reads the index, which is what a commit
+would contain, so content staged and then removed or edited away in the working copy is still
+caught; it lists the index with `git ls-files --stage -z`, reports a symbolic link without
+opening it, reads each blob by object id through one `git cat-file --batch` process, and also
+scans the working copy of every path `git status --porcelain -z` reports as changed, so a
+secret added but never staged is not invisible. `--untracked` scans the files git reports as
+untracked (`git ls-files --others --exclude-standard -z`) with the same checks, so
+`.gitignore` is respected and a file is checked before it can be staged. Both flags need a
+git work tree and say so instead of raising a traceback when there is none; a short read from
+git fails the check rather than reporting success.
 
 A line that legitimately has to look like private data can opt out by carrying the marker
 `hygiene: allow`. `planning/`, `reference/`, `.data/`, `data/`, `staticfiles/` and the cache
-directories are skipped entirely. `tests/test_repo_hygiene.py` runs the same scan over the
-whole tree, so a commit that carries a real export fails the suite rather than the scanner
-alone.
+directories are skipped entirely when the tree is walked.
+`tests/test_repo_hygiene.py` runs the same scan over the whole tree, so a commit that
+carries a real export fails the suite rather than the scanner alone.
 
 ## The test suite
 
@@ -397,7 +423,9 @@ alone.
 | `test_api_contract.py` | The envelope, every parameter guardrail, level and include, paging, `Cache-Control` |
 | `test_shell.py` | The base template, the navigation, the theme bootstrap, static assets, formatting filters |
 | `test_error_pages.py` | The 404 and 500 pages |
-| `test_settings.py` | Every setting's parsing and its fail-loud default |
+| `test_settings.py` | Every setting's parsing and its fail-loud default, the host and origin validator, the middleware order |
+| `test_security_headers.py` | One CSP with a per-request nonce on every page including the API reference and the error pages, and `no-store` on answers that carry data |
+| `test_rate_limiting.py` | The lockout after repeated wrong passwords on the login and the admin login route, and the refusal of the right password while it lasts |
 | `test_compose.py` | What Compose passes to the container and what the overlays add |
 | `test_repo_hygiene.py` | Ignore rules, `.env.example` against the settings module, the Dockerfile, the Compose files, and the private-data scan |
 | `test_parity.py` | The opt-in real-export check above |

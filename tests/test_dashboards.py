@@ -40,6 +40,7 @@ from records.reports import (
 SPAN = 60
 STEP = 3
 CSRF = re.compile(rb'name="csrfmiddlewaretoken" value="[^"]*"')
+NONCE = re.compile(rb' nonce="[^"]*"')
 COORDINATES = re.compile(r'\b(?:x|y|width|height|cx|cy|dx|dy|points)="([^"]*)"')
 SVG_OPEN = re.compile(r"<svg[^>]*>")
 RAW_FLOAT = re.compile(r"\d+\.\d{3,}")
@@ -49,6 +50,10 @@ DELTA = re.compile(
     r'<span class="visually-hidden">(?P<words>[^<]+)</span>',
     re.S,
 )
+
+
+def stable_body(content: bytes) -> bytes:
+    return NONCE.sub(b"", CSRF.sub(b"", content))
 
 
 def zone() -> ZoneInfo:
@@ -1885,7 +1890,7 @@ def test_readings_outside_the_range_do_not_add_a_single_query(signed_in, owner):
     assert after.context["readings_total"] == before.context["readings_total"]
     assert after.context["kpis"] == before.context["kpis"]
     assert after.context["range"]["start"] == before.context["range"]["start"]
-    assert CSRF.sub(b"", after.content) == CSRF.sub(b"", before.content)
+    assert stable_body(after.content) == stable_body(before.content)
 
     series = _history(owner, _fetch_window(after.context["range"]))
     assert sum(len(points) for points in series.values()) < 400
@@ -1916,7 +1921,7 @@ def test_the_printed_pages_hide_the_nav_and_keep_tables_open(signed_in):
     assert 'class="data-table" data-print-open' in body
     assert body.count("data-print-open") >= 5
     assert all("records/print.js" in page for page in bodies)
-    assert 'onclick="window.print()">Print</button>' in body
+    assert 'type="button" data-print>Print</button>' in body
     assert ".site-header," in print_block
     assert print_block.index(".site-header,") < print_block.index("display: none")
     assert ".segmented," in print_block
@@ -1927,7 +1932,10 @@ def test_the_printed_pages_hide_the_nav_and_keep_tables_open(signed_in):
 def test_the_print_script_opens_the_data_tables():
     script = Path(finders.find("records/print.js")).read_text(encoding="utf-8")
 
-    assert "[data-print-open]" in script
+    assert 'querySelectorAll("[data-print-open]")' in script
+    assert 'querySelectorAll("[data-print]")' in script
+    assert 'addEventListener("click"' in script
+    assert "window.print()" in script
     assert "beforeprint" in script
     assert "afterprint" in script
 

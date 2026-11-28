@@ -61,6 +61,12 @@ jobs:
         run: uv run python manage.py makemigrations --check --dry-run
       - name: Scan for private data
         run: uv run python tools/check_no_private_data.py
+      - name: Audit the locked dependencies
+        run: |
+          uv export --locked --no-emit-project --format requirements-txt \
+            --output-file "$RUNNER_TEMP/audit-requirements.txt"
+          uvx --python 3.14 --from pip-audit==2.10.1 pip-audit --disable-pip --strict \
+            --progress-spinner off -r "$RUNNER_TEMP/audit-requirements.txt"
       - name: Run the test suite
         run: uv run pytest -q
 

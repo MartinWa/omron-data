@@ -36,6 +36,12 @@ It cannot quietly deploy a published image or overwrite a release tag with local
 `tools/audit_image.sh IMAGE` audits an image by digest for HIGH and CRITICAL
 vulnerabilities and optionally writes its SPDX SBOM.
 
+A release is built from scratch rather than from the CI build cache, so a published image
+always carries the Debian security updates that the base image's `apt-get upgrade` layer
+picks up at build time. The CI checks job keeps reusing the cache to stay fast, which is why
+only a tag rebuild is a guarantee: rebuild locally with `docker build --no-cache` when you
+want the same freshness from a working copy.
+
 ## Configuration
 
 `compose.yaml` reads its values from a private `.env` file next to it, or from the shell
@@ -53,9 +59,9 @@ directory is not writable by the UID it runs as.
 | --- | --- | --- |
 | `OMRON_SECRET_KEY` | none, required | Django secret. Generate one per installation: `python -c "import secrets; print(secrets.token_urlsafe(48))"`. A published placeholder is rejected, so the value in `.env.example` cannot start a container |
 | `OMRON_SECRET_KEY_FILE` | empty | Path to a file holding the secret, for Docker or Podman secrets. Read only when `OMRON_SECRET_KEY` is empty. Every setting accepts the same `<NAME>_FILE` form |
-| `OMRON_ALLOWED_HOSTS` | `127.0.0.1,localhost` | Comma-separated hostnames the proxy forwards, for example `omron.example.com`. A request with any other `Host` header is refused |
+| `OMRON_ALLOWED_HOSTS` | `127.0.0.1,localhost` | Comma-separated hostnames the proxy forwards, for example `omron.example.com`. A request with any other `Host` header is refused, and `*` is refused at startup: every hostname has to be named |
 | `OMRON_TRUSTED_PROXY` | empty | The address of the reverse proxy that may set `X-Forwarded-Proto` and `X-Forwarded-For`, or `*` for any peer. Required for HTTPS behind a proxy: waitress discards both headers unless the peer is named here, and without them every browser `POST` fails the CSRF origin check. See [Proxy headers](#proxy-headers) |
-| `OMRON_CSRF_TRUSTED_ORIGINS` | empty | Comma-separated `https://` origins; needed only when the proxy rewrites the `Host` header |
+| `OMRON_CSRF_TRUSTED_ORIGINS` | empty | Comma-separated `https://` origins; needed only when the proxy rewrites the `Host` header. An entry that does not start with `https://` is refused at startup |
 | `OMRON_TIME_ZONE` | `Europe/Stockholm` | IANA zone name. The export records wall-clock times with no offset, so imports are read in this zone, impossible timestamps are reported against it, and every date in the UI is rendered in it, while the API answers in UTC with a `Z` suffix. It applies at import time: changing it later does not rewrite stored rows |
 | `OMRON_DEBUG` | `false` | Set by the development image only. With it on, a fixed development secret is accepted and the session and CSRF cookies are not `Secure`; never enable it on an instance that is reachable |
 | `OMRON_DB_PATH` | `.data/db.sqlite3` in a working copy; `/app/data/omron.sqlite3` in the image | The SQLite file. The image sets it, and the production Compose file passes nothing for it, so the database is always the file behind the `data` mount |
@@ -170,6 +176,61 @@ its own instead of waiting to be noticed and revoked.
 Every account is separate: each one imports its own exports, keeps its own tokens, and
 never sees another account's readings outside the admin.
 
+## Login rate limiting
+
+The application limits login attempts itself, so a limiter in front of it is defence in depth
+rather than a requirement. The limit is per username **and** client address: five wrong
+passwords for one username from one address lock that pair out, another account at the same
+address is unaffected, and a successful login clears the count for the account. The same limit
+covers `/accounts/login/` and `/admin/login/`, a locked-out attempt is answered with `429`
+rather than the login form, and retrying while locked out does not extend the window.
+
+The lockout lasts up to one hour, not a guaranteed hour. Expiry runs per counted row rather
+than per failure: each counted failure refreshes the timestamp of its username, address and
+user agent row, so every failure in that row ages out together, one hour after that row's most
+recent counted failure. Two browsers on one address keep their own rows, so the count of one
+browser can expire while the other still holds a fresh one, and the lockout lifts as soon as
+no counted row remains.
+
+The client address is the connection address: the one the server resolved, never a header the
+caller wrote. Behind the proxy that is the visitor's own address, because waitress replaces
+the peer address with the proxy's `X-Forwarded-For` entry for a peer declared in
+`OMRON_TRUSTED_PROXY` and discards both forwarded headers from any other. The development
+entry point is the exception: `runserver` performs no such filtering, so a forwarding header
+sent to it is ignored for this purpose and every caller counts as `127.0.0.1`. A wildcard
+`OMRON_TRUSTED_PROXY=*` trusts every peer, so anything that can reach the published port
+directly can choose the address the limiter counts against: that evades the limit, it does
+not reach another account. It is the same trust the scheme already gets, so keep the port off
+the public network as described in [Proxy headers](#proxy-headers).
+
+Failures and lockouts are logged on the `axes` logger, which reaches the container's log:
+`docker compose logs -f web` shows them as they happen, and the container's own log rotation
+bounds what is kept. A successful sign-in is still announced there at `INFO`, because axes
+emits that event whether or not it stores a row for it.
+
+The retention described here covers Axes records only: Django's own tables are separate and
+still hold sessions and each account's `last_login`. What Axes keeps in the SQLite file while
+a lockout is active is its own counter, one row per username, address and user agent in
+`axes_accessattempt`, with the failure count, the time of the last attempt and the filtered
+request data of the failed submission. Those rows survive a restart, and they are removed when
+they expire during later authentication activity, so a backup taken while a lockout is active
+can contain them. The row expires on its own, so a forgotten password is a wait rather than a
+restart:
+
+```sh
+docker compose exec web python manage.py axes_reset_username <name>
+```
+
+`axes_reset_username` clears that account's counter, which also ends a lockout you do not
+want to wait out.
+
+No other Axes record is kept. `AXES_ENABLE_ACCESS_FAILURE_LOG = False` in the settings stops
+a per-attempt failure table from being written, and `AXES_DISABLE_ACCESS_LOG = True` stops
+successful sign-ins from being stored. The only Axes row outside the container log is the
+counter above, and it disappears when it expires; the `axes_reset_logs` command would only
+clear successful sign-in rows and `axes_reset_failure_logs` only a failure table that is
+switched off here, so neither is needed routinely and the lockout simply expires.
+
 ## Connecting a reverse proxy
 
 Two patterns cover the usual home lab setups. Terminate TLS at the proxy, keep the app
@@ -211,8 +272,10 @@ not bind the port to `0.0.0.0`.
 
 ### Proxy headers
 
-Forward the original `Host` and the client's `X-Forwarded-Proto` on every request; the
-application reads that header rather than trusting a scheme of its own. With `OMRON_DEBUG`
+Forward the original `Host` and the client's `X-Forwarded-Proto` on every request. The app
+trusts that header only when `OMRON_TRUSTED_PROXY` names a proxy: with the variable empty it
+falls back to the scheme of the request it received, and a forwarded scheme is ignored on top
+of waitress clearing both headers from a peer it was not told to trust. With `OMRON_DEBUG`
 off the session and CSRF cookies are `Secure`, so the app has to be served over HTTPS.
 
 waitress strips `X-Forwarded-Proto` and `X-Forwarded-For` from any peer it has not been told
@@ -258,6 +321,47 @@ omron.example.com {
     reverse_proxy web:8000
 }
 ```
+
+### TLS, HSTS and cookies
+
+TLS terminates at the reverse proxy. The image serves plain HTTP on its private port and
+holds no certificate, so HSTS is a proxy decision as well: only the proxy knows the hostname
+is reachable over HTTPS everywhere. Caddy sends the header when you ask it to, in the same
+block:
+
+```caddyfile
+omron.example.com {
+    reverse_proxy web:8000
+    header Strict-Transport-Security "max-age=31536000; includeSubDomains"
+}
+```
+
+With nginx it is an `add_header` in the `server` block, next to the `location` above:
+
+```nginx
+add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+```
+
+None of the cookie flags need a setting at the proxy. Django marks the session cookie
+`HttpOnly` and gives both the session and the CSRF cookie `SameSite=Lax`, and the app sets
+`Secure` on both whenever `OMRON_DEBUG` is off, so a browser refuses to send either one over
+plain HTTP. `SameSite=Lax` is left alone: every form in the app posts to its own origin, so
+another value would only loosen what the CSRF middleware already checks.
+
+The app also sends its own security headers, and the proxy should pass them through
+untouched rather than add caching: one `Content-Security-Policy` for every page, built around
+a fresh nonce that each inline script carries, and `Cache-Control: no-store` on every
+authenticated page and every API response, so a cache in front of the app can never hand one
+account's readings to another. The generated API reference at `/api/v1/docs` needs no
+exemption: its only inline script is a `type="application/json"` data block, which the nonce
+policy does not restrict because nothing executes it. Styles are external only (`style-src
+'self'`), so a template that grows a `style="..."` attribute or a `<style>` block would be
+dropped by the policy; Django's admin carries neither on the pages this app serves. Do not
+enable caching for this upstream.
+
+Failed logins and lockouts are logged on the `axes` logger, which reaches the container's
+console: `docker compose logs -f web` shows each attempt as the limiter records it. See
+[Login rate limiting](#login-rate-limiting).
 
 Keep `.env` private: it is gitignored, excluded from the image build context, and must
 never be committed.

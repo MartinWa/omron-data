@@ -46,7 +46,14 @@ Run the app behind a TLS reverse proxy; it publishes no ports. Set
 `OMRON_SECRET_KEY` and `OMRON_ALLOWED_HOSTS`, and keep the SQLite database and its
 backups private: `OMRON_DB_PATH` decides where the file lives, `.data/db.sqlite3`
 by default, and that directory is the thing to protect. Mark a token you no longer
-need as revoked instead of leaving it live.
+need as revoked instead of leaving it live. Login is rate-limited in the app: five wrong
+passwords for one username from one client address lock that pair out for up to an hour, with
+the counter kept in the same database as one row per username, address and user agent, removed
+when it expires, so a backup taken during a lockout can hold it. That is the only record the
+limiter keeps: `AXES_ENABLE_ACCESS_FAILURE_LOG = False` and `AXES_DISABLE_ACCESS_LOG = True`,
+so no per-attempt or sign-in row is written. Django's own session and `last_login` rows are
+unaffected by those settings. Failures, lockouts and successful sign-ins are all logged on the
+`axes` logger to the container log.
 
 Never paste a real export into an issue, a pull request or a paste site, not even a
 single row: one export is a person's whole history for the range it covers, and its
