@@ -65,7 +65,7 @@ def _check_sqlite_write_access(probe):
         except OperationalError as error:
             if not _is_lock_contention(error):
                 raise
-            logger.warning("The SQLite write lock is held elsewhere; write access was not checked.")
+            logger.info("The SQLite write lock is held elsewhere; write access was not checked.")
             return
         try:
             cursor.execute("PRAGMA user_version")

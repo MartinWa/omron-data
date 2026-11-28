@@ -283,6 +283,14 @@ def test_readyz_opens_a_migrated_database_with_special_characters_in_its_path(
     assert Client().get("/api/v1/readyz").status_code == 200
 
 
+def test_readyz_leaves_a_migrated_database_byte_identical(point_readyz_at, migrated_database_file):
+    before = migrated_database_file.read_bytes()
+    point_readyz_at(migrated_database_file)
+
+    assert Client().get("/api/v1/readyz").status_code == 200
+    assert migrated_database_file.read_bytes() == before
+
+
 def test_readyz_rejects_a_read_only_database(point_readyz_at, migrated_database_file, caplog):
     migrated_database_file.chmod(0o444)
     point_readyz_at(migrated_database_file)
@@ -302,12 +310,15 @@ def test_readyz_accepts_a_database_with_an_active_writer(
 
     with closing(sqlite3.connect(migrated_database_file)) as writer:
         writer.execute("BEGIN IMMEDIATE")
-        with caplog.at_level(logging.WARNING, logger="django"):
+        with caplog.at_level(logging.INFO, logger="django"):
             response = Client().get("/api/v1/readyz")
         writer.rollback()
 
     assert response.status_code == 200
-    assert "write lock is held elsewhere" in caplog.text
+    skipped = [
+        record for record in caplog.records if "write lock is held elsewhere" in record.getMessage()
+    ]
+    assert [record.levelno for record in skipped] == [logging.INFO]
 
 
 @pytest.mark.parametrize("name", ("0001_initial", "0005_rename_body_composition_metrics"))
