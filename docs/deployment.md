@@ -208,12 +208,14 @@ Failures and lockouts are logged on the `axes` logger, which reaches the contain
 bounds what is kept. A successful sign-in is still announced there at `INFO`, because axes
 emits that event whether or not it stores a row for it.
 
-What the SQLite file does hold while a lockout is active is the limiter's own counter: one
-row per username, address and user agent in `axes_accessattempt`, with the failure count, the
-time of the last attempt and the filtered request data of the failed submission. Those rows
-survive a restart, and they are removed when they expire during later authentication activity,
-so a backup taken while a lockout is active can contain them. The row expires on its own, so a
-forgotten password is a wait rather than a restart:
+The retention described here covers Axes records only: Django's own tables are separate and
+still hold sessions and each account's `last_login`. What Axes keeps in the SQLite file while
+a lockout is active is its own counter, one row per username, address and user agent in
+`axes_accessattempt`, with the failure count, the time of the last attempt and the filtered
+request data of the failed submission. Those rows survive a restart, and they are removed when
+they expire during later authentication activity, so a backup taken while a lockout is active
+can contain them. The row expires on its own, so a forgotten password is a wait rather than a
+restart:
 
 ```sh
 docker compose exec web python manage.py axes_reset_username <name>
@@ -222,11 +224,11 @@ docker compose exec web python manage.py axes_reset_username <name>
 `axes_reset_username` clears that account's counter, which also ends a lockout you do not
 want to wait out.
 
-Nothing else is kept. `AXES_ENABLE_ACCESS_FAILURE_LOG = False` in the settings stops a
-per-attempt failure table from being written, and `AXES_DISABLE_ACCESS_LOG = True` stops
-successful sign-ins from being stored. The only failure record outside the container log is
-the counter row above, and it disappears when it expires; the `axes_reset_logs` command would
-only clear successful sign-in rows and `axes_reset_failure_logs` only a failure table that is
+No other Axes record is kept. `AXES_ENABLE_ACCESS_FAILURE_LOG = False` in the settings stops
+a per-attempt failure table from being written, and `AXES_DISABLE_ACCESS_LOG = True` stops
+successful sign-ins from being stored. The only Axes row outside the container log is the
+counter above, and it disappears when it expires; the `axes_reset_logs` command would only
+clear successful sign-in rows and `axes_reset_failure_logs` only a failure table that is
 switched off here, so neither is needed routinely and the lockout simply expires.
 
 ## Connecting a reverse proxy

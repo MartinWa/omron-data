@@ -757,3 +757,37 @@ def test_the_staged_scan_keeps_the_new_path_of_a_rename(tmp_path, monkeypatch, c
     output = capsys.readouterr().out
     assert "moved.md:1: email address" in output
     assert "notes.md:1: email address" not in output
+
+
+def test_an_address_ending_a_sentence_is_still_reported(tmp_path):
+    notes = tmp_path / "notes.md"
+    email = "real.person" + "@" + "corp.example"
+    notes.write_text(f"Mail me at {email}.\n", encoding="utf-8")
+
+    assert content_violations([str(notes)]) == [f"{notes}:1: email address"]
+
+
+def test_an_address_followed_by_a_closing_parenthesis_is_still_reported(tmp_path):
+    notes = tmp_path / "notes.md"
+    email = "real.person" + "@" + "corp.example"
+    notes.write_text(f"Mail me (at {email})\n", encoding="utf-8")
+
+    assert content_violations([str(notes)]) == [f"{notes}:1: email address"]
+
+
+def test_only_the_reserved_example_domains_are_exempt(tmp_path):
+    notes = tmp_path / "notes.md"
+    exempt = "nobody" + "@" + "example.com"
+    lookalike = "someone" + "@" + "example.company"
+    notes.write_text(f"{exempt}\n{lookalike}\n", encoding="utf-8")
+
+    assert content_violations([str(notes)]) == [f"{notes}:2: email address"]
+
+
+def test_a_placeholder_assignment_does_not_hide_a_real_one(tmp_path):
+    notes = tmp_path / "notes.md"
+    placeholder = "password" + ' = "' + "your-token-here" + '"'
+    real = "password" + ' = "' + "b" * 40 + '"'
+    notes.write_text(f"{placeholder} {real}\n", encoding="utf-8")
+
+    assert content_violations([str(notes)]) == [f"{notes}:1: assigned secret"]

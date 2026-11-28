@@ -373,9 +373,11 @@ kinds of finding:
   `reference/`
 - by text, streamed line by line with no file-size cutoff: a bearer token, a private key
   block, an AWS access key, a classic or fine-grained GitHub token, a Slack token, an assigned
-  secret such as `password = "..."`, an e-mail address outside `example.com`, and an absolute
-  host path such as a home directory, `/root`, `/srv` or `/mnt`. A single line above 2 MB is
-  reported as unscannable rather than silently dropped
+  secret such as `password = "..."`, an e-mail address whose domain is not exactly one of the
+  reserved `example.com`, `example.org` or `example.net` (trailing sentence punctuation is
+  trimmed first, so an address ending a sentence still counts), and an absolute host path such
+  as a home directory, `/root`, `/srv` or `/mnt`. A single line above 2 MB is reported as
+  unscannable rather than silently dropped
 - inside an image of any size: a PNG `tEXt`, `iTXt`, `zTXt` or `eXIf` chunk, or JPEG Exif
   metadata, read by streaming the file rather than loading it, so size cannot hide metadata.
   A screenshot carries the host name of the machine it was taken on even when the pixels

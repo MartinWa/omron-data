@@ -63,7 +63,8 @@ SYMLINK_MODE = "120000"
 LOCAL_PART_CHARACTERS = frozenset(string.ascii_letters + string.digits + "._%+-")
 DOMAIN_CHARACTERS = frozenset(string.ascii_letters + string.digits + ".-")
 DOMAIN_END = re.compile(r"[A-Za-z0-9.-]+\.[A-Za-z]{2,}\Z")
-PUBLIC_EXAMPLE_DOMAINS = ("example.com", "example.org", "example.net")
+PUBLIC_EXAMPLE_DOMAINS = frozenset({"example.com", "example.org", "example.net"})
+SENTENCE_PUNCTUATION = ".,;:!?)]}\"'>"
 LOCAL_PART_LIMIT = 64
 DOMAIN_LIMIT = 255
 
@@ -81,11 +82,11 @@ def has_email_address(line: str) -> bool:
         end = position + 1
         while end < len(line) and end - position <= DOMAIN_LIMIT and line[end] in DOMAIN_CHARACTERS:
             end += 1
-        domain = line[position + 1 : end]
+        domain = line[position + 1 : end].rstrip(SENTENCE_PUNCTUATION)
         if (
             start < position
             and DOMAIN_END.match(domain)
-            and not domain.startswith(PUBLIC_EXAMPLE_DOMAINS)
+            and domain.lower() not in PUBLIC_EXAMPLE_DOMAINS
         ):
             return True
         position = line.find("@", position + 1)
