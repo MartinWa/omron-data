@@ -1,7 +1,6 @@
 """Fail unless this installation is configured and migrated for production."""
 
 import os
-import sqlite3
 import sys
 from pathlib import Path
 
@@ -48,6 +47,10 @@ def check_secret(settings) -> list[str]:
 
 
 def check_database(settings) -> list[str]:
+    from django.db import connections
+
+    from records.db import probe_database
+
     path = Path(settings.DATABASES["default"]["NAME"])
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -57,39 +60,24 @@ def check_database(settings) -> list[str]:
     except OSError as error:
         return [f"{path.parent} is not writable: {error}"]
     try:
-        with sqlite3.connect(path.absolute().as_uri() + "?mode=rw", uri=True) as connection:
-            connection.execute("SELECT COUNT(*) FROM django_migrations").fetchone()
-    except sqlite3.Error as error:
-        return [f"{path} cannot be opened read-write: {error}"]
-    return []
-
-
-def check_migrations() -> list[str]:
-    from django.db import connections
-    from django.db.migrations.executor import MigrationExecutor
-
-    executor = MigrationExecutor(connections["default"])
-    unapplied = executor.migration_plan(executor.loader.graph.leaf_nodes())
-    if unapplied:
-        listed = ", ".join(
-            f"{migration.app_label}.{migration.name}" for migration, _ in unapplied[:5]
-        )
-        return [f"{len(unapplied)} migration(s) are not applied ({listed}); run manage.py migrate."]
+        pending = probe_database(connections["default"])
+    except Exception as error:
+        return [f"Database check failed for {path}: {error}"]
+    if pending:
+        listed = ", ".join(pending[:5])
+        return [f"{len(pending)} migration(s) pending ({listed}). Run manage.py migrate."]
     return []
 
 
 def collect() -> list[str]:
     from django.conf import settings
 
-    problems = (
+    return (
         check_debug(settings)
         + check_trusted_proxy(settings)
         + check_secret(settings)
         + check_database(settings)
     )
-    if problems:
-        return problems
-    return check_migrations()
 
 
 def main() -> int:
@@ -111,7 +99,7 @@ def main() -> int:
         return 1
     print(
         "Production check passed: DEBUG off, a declared trusted proxy, a private secret, a "
-        "writable database and applied migrations."
+        "writable database and a complete, consistent migration history."
     )
     return 0
 

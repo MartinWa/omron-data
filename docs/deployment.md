@@ -126,11 +126,9 @@ curl -fsS https://omron.example.com/api/v1/healthz   # liveness
 curl -fsS https://omron.example.com/api/v1/readyz    # readiness: database and migrations
 ```
 
-Both probe endpoints need no token (the schema and the docs page are open too, and carry no
-data), so they are the ones to put in a monitor. `readyz` opens the database and checks that
-all migrations are applied, answering `503` while they are not; `healthz` answers regardless
-of the database, so a broken data volume shows up as unhealthy instead of as a container
-that looks fine while every page 500s.
+Both probe endpoints are anonymous. `readyz` checks write access to the existing database
+and verifies that migration history is complete and consistent. It answers `503` if either
+check fails. `healthz` answers independently of the database.
 `/admin/` exists for an administrator; the pages a person uses are in the header:
 *Readings*, *Imports* and *Tokens*.
 
@@ -290,9 +288,12 @@ asset cannot end up in a commit.
 
 ## Upgrading
 
-Take a backup before upgrading (see
-[backup-and-recovery.md](backup-and-recovery.md)), update `OMRON_IMAGE` to the new
-released tag, then:
+Take a backup before upgrading. See [Backup and recovery](backup-and-recovery.md).
+
+Set `OMRON_TRUSTED_PROXY` in `.env` before replacing the running container. The
+production entry point now requires a trusted proxy at startup. See [Proxy headers](#proxy-headers).
+
+Update `OMRON_IMAGE` to the release tag and recreate the container.
 
 ```sh
 docker compose up -d --pull always
@@ -316,8 +317,6 @@ Where they are depends on how this instance was configured:
 - With it unset, the old and the current code both use `omron-data-pending/` under the
   system temp directory, so the marker-less subdirectories to remove there are one level
   further down, inside `omron-data-pending/`.
-
-Nothing else needs attention.
 
 ## Ownership
 
@@ -345,9 +344,9 @@ docker compose exec -T web python tools/check_production.py
 docker compose exec -T web python tools/healthcheck.py
 ```
 
-`check_production.py` fails unless `OMRON_DEBUG` is off, the secret is neither empty nor a
-published placeholder, the database directory is writable and every migration is applied;
-it prints one line per problem. `healthcheck.py` is what the container's own health check
-runs. It probes `127.0.0.1` on `OMRON_PORT` with the first hostname from
+`check_production.py` requires `OMRON_DEBUG` off, a declared trusted proxy, a private
+secret, a writable database and directory, and a complete, consistent migration history.
+It prints one line per problem. The container runs `healthcheck.py`, which probes
+`127.0.0.1` on `OMRON_PORT` with the first hostname from
 `OMRON_ALLOWED_HOSTS` as the `Host` header, so a wrong `OMRON_ALLOWED_HOSTS` shows up here
 as an unhealthy container rather than as a silent 400 on every page.

@@ -1,5 +1,11 @@
 import json
+import logging
+import sqlite3
+from contextlib import closing
 
+import pytest
+from django.db import OperationalError, connection
+from django.db.migrations.recorder import MigrationRecorder
 from django.http import HttpResponse
 from django.test import Client
 
@@ -7,6 +13,7 @@ from records.contract import CONTRACT_VERSION, MAX_LIMIT
 from records.core import _handle_unexpected
 from records.middleware import _converted
 from records.models import COMPONENTS, METRICS, PANEL, Measurement
+from records.routers import meta
 
 ENVELOPE = {"contract_version", "generated_at"}
 
@@ -170,47 +177,7 @@ def test_readyz_answers_without_a_token_when_the_database_is_migrated(db):
     assert ENVELOPE.issubset(body)
 
 
-def test_readyz_rejects_a_missing_prerequisite_in_a_sqlite_file(
-    transactional_db, monkeypatch, tmp_path, caplog
-):
-    import sqlite3
-    from contextlib import closing
-    from types import SimpleNamespace
-
-    from django.db import connection
-
-    import records.routers.meta as meta
-
-    path = tmp_path / "readiness.sqlite3"
-    file_connection = SimpleNamespace(
-        settings_dict={"ENGINE": "django.db.backends.sqlite3", "NAME": path},
-        is_in_memory_db=lambda: False,
-    )
-    monkeypatch.setattr(meta, "connection", file_connection)
-
-    client = Client()
-    connection.ensure_connection()
-    with closing(sqlite3.connect(path, autocommit=True)) as snapshot:
-        connection.connection.backup(snapshot)
-        assert client.get("/api/v1/readyz").status_code == 200
-
-        removed = snapshot.execute(
-            "DELETE FROM django_migrations WHERE app = ? AND name = ?",
-            ("records", "0001_initial"),
-        )
-        assert removed.rowcount == 1
-
-    response = client.get("/api/v1/readyz")
-
-    assert response.status_code == 503
-    assert response.json()["error"]["code"] == "service_unavailable"
-    assert "records.0001_initial" in caplog.text
-    assert "records.0001_initial" not in response.content.decode()
-    assert client.get("/api/v1/healthz").status_code == 200
-
-
 def test_readyz_answers_503_with_the_envelope_when_migrations_are_pending(db, monkeypatch, caplog):
-    import logging
     from types import SimpleNamespace
 
     from django.db.migrations.executor import MigrationExecutor
@@ -233,14 +200,9 @@ def test_readyz_answers_503_with_the_envelope_when_migrations_are_pending(db, mo
 def test_readyz_answers_503_with_the_envelope_when_the_database_is_unreadable(
     db, monkeypatch, caplog
 ):
-    import logging
-
-    from django.db import OperationalError
-
-    import records.routers.meta as meta
-
     class BrokenConnection:
-        settings_dict = {"NAME": ":memory:", "ENGINE": "django.db.backends.sqlite3"}
+        vendor = "sqlite"
+        settings_dict = {"NAME": ":memory:"}
 
         def is_in_memory_db(self):
             return True
@@ -265,67 +227,30 @@ def test_readyz_answers_503_with_the_envelope_when_the_database_is_unreadable(
     )
 
 
-def test_readyz_refuses_a_missing_database_file_without_creating_it(db, monkeypatch, tmp_path):
-    import records.routers.meta as meta
+@pytest.fixture
+def point_readyz_at(monkeypatch):
+    def configure(name):
+        database = connection.copy()
+        database.settings_dict["NAME"] = name
+        monkeypatch.setattr(meta, "connection", database)
 
-    missing = tmp_path / "gone.sqlite3"
-
-    class MissingConnection:
-        settings_dict = {
-            "NAME": str(missing),
-            "ENGINE": "django.db.backends.sqlite3",
-        }
-
-        def is_in_memory_db(self):
-            return False
-
-    monkeypatch.setattr(meta, "connection", MissingConnection())
-
-    response = Client().get("/api/v1/readyz")
-
-    assert response.status_code == 503
-    assert response.json()["error"]["message"] == "Service temporarily unavailable"
-    assert not missing.exists()
+    return configure
 
 
-def test_readyz_treats_an_empty_database_file_as_pending_without_writing_to_it(
-    db, monkeypatch, tmp_path
+@pytest.fixture
+def migrated_database_file(transactional_db, tmp_path):
+    path = tmp_path / "omron#backup%.sqlite3"
+    connection.ensure_connection()
+    with closing(sqlite3.connect(path)) as destination:
+        connection.connection.backup(destination)
+    return path
+
+
+@pytest.mark.parametrize("filename", ("gone.sqlite3", "gone#backup%.sqlite3"))
+def test_readyz_refuses_a_missing_database_file_without_creating_it(
+    db, point_readyz_at, tmp_path, filename
 ):
-    import records.routers.meta as meta
-
-    empty = tmp_path / "empty.sqlite3"
-    empty.touch()
-
-    class EmptyConnection:
-        settings_dict = {
-            "NAME": str(empty),
-            "ENGINE": "django.db.backends.sqlite3",
-        }
-
-        def is_in_memory_db(self):
-            return False
-
-    monkeypatch.setattr(meta, "connection", EmptyConnection())
-
-    response = Client().get("/api/v1/readyz")
-
-    assert response.status_code == 503
-    assert response.json()["error"]["message"] == "Service temporarily unavailable"
-    assert empty.stat().st_size == 0
-
-
-def test_readyz_uri_encodes_special_characters_in_the_database_path(db, monkeypatch, tmp_path):
-    import records.routers.meta as meta
-
-    weird = tmp_path / "omron#backup?x.sqlite3"
-
-    class WeirdConnection:
-        settings_dict = {"NAME": str(weird), "ENGINE": "django.db.backends.sqlite3"}
-
-        def is_in_memory_db(self):
-            return False
-
-    monkeypatch.setattr(meta, "connection", WeirdConnection())
+    point_readyz_at(str(tmp_path / filename))
 
     response = Client().get("/api/v1/readyz")
 
@@ -334,44 +259,97 @@ def test_readyz_uri_encodes_special_characters_in_the_database_path(db, monkeypa
     assert list(tmp_path.iterdir()) == []
 
 
-def test_readyz_logs_the_real_cause_when_the_migration_read_fails(
-    db, monkeypatch, tmp_path, caplog
+def test_readyz_treats_an_empty_database_file_as_pending_without_writing_to_it(
+    db, point_readyz_at, tmp_path, caplog
 ):
-    import logging
-    import sqlite3
-    from types import SimpleNamespace
+    empty = tmp_path / "empty.sqlite3"
+    empty.touch()
+    point_readyz_at(empty)
 
-    import records.routers.meta as meta
+    with caplog.at_level(logging.ERROR, logger="django"):
+        response = Client().get("/api/v1/readyz")
 
-    target = tmp_path / "locked.sqlite3"
-    target.touch()
+    assert response.status_code == 503
+    assert response.json()["error"]["message"] == "Service temporarily unavailable"
+    assert "migration(s) pending" in caplog.text
+    assert empty.read_bytes() == b""
 
-    class LockedProbe:
-        def execute(self, sql):
-            if "django_migrations" in sql:
-                raise sqlite3.OperationalError("database is locked")
-            return []
 
-        def close(self):
-            pass
+def test_readyz_opens_a_migrated_database_with_special_characters_in_its_path(
+    point_readyz_at, migrated_database_file
+):
+    point_readyz_at(migrated_database_file)
 
-    monkeypatch.setattr(
-        meta,
-        "sqlite3",
-        SimpleNamespace(
-            connect=lambda *args, **kwargs: LockedProbe(),
-            Error=sqlite3.Error,
-            OperationalError=sqlite3.OperationalError,
-        ),
-    )
+    assert Client().get("/api/v1/readyz").status_code == 200
 
-    class FileConnection:
-        settings_dict = {"NAME": str(target), "ENGINE": "django.db.backends.sqlite3"}
 
-        def is_in_memory_db(self):
-            return False
+def test_readyz_leaves_a_migrated_database_byte_identical(point_readyz_at, migrated_database_file):
+    before = migrated_database_file.read_bytes()
+    point_readyz_at(migrated_database_file)
 
-    monkeypatch.setattr(meta, "connection", FileConnection())
+    assert Client().get("/api/v1/readyz").status_code == 200
+    assert migrated_database_file.read_bytes() == before
+
+
+def test_readyz_rejects_a_read_only_database(point_readyz_at, migrated_database_file, caplog):
+    migrated_database_file.chmod(0o444)
+    point_readyz_at(migrated_database_file)
+
+    with caplog.at_level(logging.ERROR, logger="django"):
+        response = Client().get("/api/v1/readyz")
+
+    assert response.status_code == 503
+    assert response.json()["error"]["message"] == "Service temporarily unavailable"
+    assert "readonly database" in caplog.text
+
+
+def test_readyz_accepts_a_database_with_an_active_writer(
+    point_readyz_at, migrated_database_file, caplog
+):
+    point_readyz_at(migrated_database_file)
+
+    with closing(sqlite3.connect(migrated_database_file)) as writer:
+        writer.execute("BEGIN IMMEDIATE")
+        with caplog.at_level(logging.INFO, logger="django"):
+            response = Client().get("/api/v1/readyz")
+        writer.rollback()
+
+    assert response.status_code == 200
+    skipped = [
+        record for record in caplog.records if "write lock is held elsewhere" in record.getMessage()
+    ]
+    assert [record.levelno for record in skipped] == [logging.INFO]
+
+
+@pytest.mark.parametrize("name", ("0001_initial", "0005_rename_body_composition_metrics"))
+def test_readyz_rejects_an_applied_migration_with_a_missing_dependency(
+    point_readyz_at, migrated_database_file, caplog, name
+):
+    with closing(sqlite3.connect(migrated_database_file)) as snapshot, snapshot:
+        removed = snapshot.execute(
+            "DELETE FROM django_migrations WHERE app = ? AND name = ?", ("records", name)
+        )
+        assert removed.rowcount == 1
+    point_readyz_at(migrated_database_file)
+
+    with caplog.at_level(logging.ERROR, logger="django"):
+        response = Client().get("/api/v1/readyz")
+
+    assert response.status_code == 503
+    assert response.json()["error"]["message"] == "Service temporarily unavailable"
+    assert "InconsistentMigrationHistory" in caplog.text
+    assert f"records.{name}" in caplog.text
+    assert f"records.{name}" not in response.content.decode()
+
+
+def test_readyz_logs_the_real_cause_when_the_migration_read_fails(
+    point_readyz_at, migrated_database_file, monkeypatch, caplog
+):
+    def fail_read(self):
+        raise OperationalError("database is locked")
+
+    point_readyz_at(migrated_database_file)
+    monkeypatch.setattr(MigrationRecorder, "applied_migrations", fail_read)
 
     with caplog.at_level(logging.ERROR, logger="django"):
         response = Client().get("/api/v1/readyz")
@@ -379,7 +357,7 @@ def test_readyz_logs_the_real_cause_when_the_migration_read_fails(
     assert response.status_code == 503
     assert response.json()["error"]["message"] == "Service temporarily unavailable"
     assert "database is locked" in caplog.text
-    assert "pending" not in caplog.text
+    assert "migration(s) pending" not in caplog.text
 
 
 def test_metrics_matches_the_registry_with_units_and_kinds(auth):

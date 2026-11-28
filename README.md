@@ -166,7 +166,7 @@ the endpoints; `/api/v1/openapi.json` is the schema.
 |---|---|
 | `/api/v1/` | the contract version and the endpoint list |
 | `/api/v1/healthz` | liveness, and one of two data endpoints that need no token |
-| `/api/v1/readyz` | readiness: the database opens and all migrations are applied; what the container health check calls |
+| `/api/v1/readyz` | readiness, including SQLite write access and a complete, consistent migration history. Used by the container health check |
 | `/api/v1/metrics` | the metric registry with units and whether a code is a panel, a component or a plain reading |
 | `/api/v1/measurements` | a page of readings, `level=panel` by default |
 | `/api/v1/measurements/{id}` | one row plus its components |
