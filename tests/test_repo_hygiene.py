@@ -4,7 +4,17 @@ import subprocess
 import sys
 from pathlib import Path
 
-from tools.check_no_private_data import candidate_files, content_violations, find_violations
+import pytest
+
+from tools.check_no_private_data import (
+    MAX_SCAN_BYTES,
+    PNG_SIGNATURE,
+    candidate_files,
+    content_violations,
+    find_violations,
+    main,
+    untracked_files,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -290,6 +300,17 @@ def test_image_is_multi_stage_and_needs_no_pip_at_runtime():
     assert dockerfile.rstrip().endswith('CMD ["python", "-m", "tools.serve"]')
 
 
+def test_a_release_builds_from_scratch_so_its_os_packages_are_current():
+    release = read(".github/workflows/release.yml")
+    continuous = read(".github/workflows/ci.yml")
+
+    assert release.count("no-cache: true") == release.count("docker/build-push-action")
+    assert "no-cache: true" not in continuous
+    for text in (release, continuous, read("Dockerfile")):
+        assert "OS_PACKAGE_DATE" not in text
+        assert "os-package-date" not in text
+
+
 def test_operational_tools_use_the_standard_library_only():
     healthcheck = read("tools/healthcheck.py")
     serve = read("tools/serve.py")
@@ -386,3 +407,120 @@ def test_private_data_scan_passes_on_this_tree():
 
     assert find_violations(files) == []
     assert content_violations(files) == []
+
+
+def test_private_data_scan_flags_cloud_and_chat_tokens(tmp_path):
+    sample = tmp_path / "notes.md"
+    aws = "AKIA" + "IOSFODNN7EXAMPLE"
+    github = "ghp_" + "a" * 36
+    slack = "xoxb-" + "123456789012-abcdefgh"
+    assigned = "password" + ' = "' + "a" * 32 + '"'
+    sample.write_text(f"{aws}\n{github}\n{slack}\n{assigned}\n", encoding="utf-8")
+
+    assert content_violations([str(sample)]) == [
+        f"{sample}:1: AWS access key",
+        f"{sample}:2: GitHub token",
+        f"{sample}:3: Slack token",
+        f"{sample}:4: assigned secret",
+    ]
+
+
+def test_private_data_scan_flags_the_host_paths_of_a_server(tmp_path):
+    sample = tmp_path / "notes.md"
+    roots = ("root", "srv", "mnt")
+    sample.write_text("".join(f"/{name}/exports\n" for name in roots), encoding="utf-8")
+
+    assert content_violations([str(sample)]) == [
+        f"{sample}:{number}: absolute host path" for number in (1, 2, 3)
+    ]
+
+
+def png_chunk(kind: bytes, data: bytes) -> bytes:
+    return len(data).to_bytes(4, "big") + kind + data + b"\x00\x00\x00\x00"
+
+
+def test_private_data_scan_flags_image_metadata(tmp_path):
+    png = tmp_path / "photo.png"
+    png.write_bytes(
+        PNG_SIGNATURE + png_chunk(b"tEXt", b"Comment\x00synthetic") + png_chunk(b"IEND", b"")
+    )
+    jpeg = tmp_path / "photo.jpg"
+    jpeg.write_bytes(b"\xff\xd8\xff\xe1" + b"Exif\x00\x00" + b"\xff\xd9")
+
+    assert content_violations([str(png), str(jpeg)]) == [
+        f"{png}: PNG tEXt metadata chunk",
+        f"{jpeg}: JPEG Exif metadata",
+    ]
+
+
+def git_init(directory: Path) -> None:
+    subprocess.run(["git", "init", "-q"], cwd=directory, check=True)  # noqa: S607
+
+
+def test_the_untracked_scan_lists_only_files_git_does_not_ignore(tmp_path, monkeypatch):
+    git_init(tmp_path)
+    (tmp_path / ".gitignore").write_text("*.csv\n", encoding="utf-8")
+    (tmp_path / "notes.md").write_text("readings\n", encoding="utf-8")
+    (tmp_path / "export.csv").write_text("time,pulse\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    assert sorted(untracked_files()) == [".gitignore", "notes.md"]
+
+
+def test_the_untracked_scan_reuses_the_name_and_content_checks(tmp_path, monkeypatch):
+    git_init(tmp_path)
+    (tmp_path / "laptop-token.txt").write_text("a synthetic secret\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    assert main(["--untracked"]) == 1
+
+
+def test_the_default_scan_walks_the_working_tree(tmp_path, monkeypatch):
+    (tmp_path / "state.db").write_text("", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    assert main([]) == 1
+
+
+def test_a_committed_pdf_is_refused_by_name():
+    assert find_violations(["invoice.pdf", "docs/report.PDF"]) == [
+        "docs/report.PDF",
+        "invoice.pdf",
+    ]
+
+
+def test_an_oversized_image_is_skipped_before_it_is_read(tmp_path):
+    png = tmp_path / "huge.png"
+    png.write_bytes(
+        PNG_SIGNATURE + png_chunk(b"tEXt", b"Comment\x00synthetic") + b"\x00" * MAX_SCAN_BYTES
+    )
+
+    assert content_violations([str(png)]) == []
+
+
+def test_the_untracked_scan_fails_clearly_outside_a_work_tree(tmp_path):
+    result = subprocess.run(  # noqa: S603
+        [sys.executable, str(ROOT / "tools" / "check_no_private_data.py"), "--untracked"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 1
+    assert "needs a git work tree" in result.stderr
+    assert "Traceback" not in result.stderr
+
+
+def test_the_untracked_scan_fails_clearly_without_git(tmp_path, monkeypatch, capsys):
+    def missing_git():
+        raise FileNotFoundError(2, "No such file or directory", "git")
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("tools.check_no_private_data.untracked_files", missing_git)
+
+    with pytest.raises(SystemExit) as exit_info:
+        main(["--untracked"])
+
+    assert exit_info.value.code == 1
+    assert "needs git" in capsys.readouterr().err

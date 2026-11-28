@@ -1,10 +1,12 @@
 import http.client
+import importlib
 import threading
 
 import pytest
 from django.test import RequestFactory, override_settings
 from waitress.server import create_server
 
+import omron_data.settings as settings_module
 from tools.serve import listen_address, proxy_options, verify_proxy_configuration
 
 
@@ -73,10 +75,23 @@ def test_a_declared_proxy_trusts_the_scheme_and_forwarding_headers(settings):
     assert options["clear_untrusted_proxy_headers"] is True
 
 
-def test_django_takes_the_scheme_from_the_forwarded_header():
+def test_the_forwarded_scheme_is_ignored_without_a_trusted_proxy():
     request = RequestFactory().get("/accounts/login/", headers={"x-forwarded-proto": "https"})
 
-    assert request.is_secure() is True
+    assert request.is_secure() is False
+
+
+def test_a_declared_proxy_makes_django_take_the_forwarded_scheme(monkeypatch):
+    with monkeypatch.context() as declared:
+        declared.setenv("OMRON_TRUSTED_PROXY", "*")
+        header = importlib.reload(settings_module).SECURE_PROXY_SSL_HEADER
+    importlib.reload(settings_module)
+
+    assert header == ("HTTP_X_FORWARDED_PROTO", "https")
+    with override_settings(SECURE_PROXY_SSL_HEADER=header):
+        request = RequestFactory().get("/accounts/login/", headers={"x-forwarded-proto": "https"})
+
+        assert request.is_secure() is True
 
 
 def test_production_refuses_to_start_without_a_trusted_proxy(settings):

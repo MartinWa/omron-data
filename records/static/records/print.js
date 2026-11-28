@@ -1,4 +1,10 @@
 (function () {
+  document.querySelectorAll("[data-print]").forEach(function (button) {
+    button.addEventListener("click", function () {
+      window.print();
+    });
+  });
+
   const items = Array.from(document.querySelectorAll("[data-print-open]"));
   if (!items.length) return;
 

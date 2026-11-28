@@ -23,6 +23,7 @@ uv run ruff check .
 uv run ruff format --check .
 uv run python manage.py makemigrations --check --dry-run
 uv run python tools/check_no_private_data.py
+uv run python tools/check_no_private_data.py --untracked
 ```
 
 Outside pytest the settings refuse to start without a real `OMRON_SECRET_KEY`, by design;
@@ -34,8 +35,8 @@ export OMRON_SECRET_KEY="$(python -c 'import secrets; print(secrets.token_urlsaf
 
 ## Layout
 
-- `omron_data/` — settings, URLs, WSGI entry point, `app_info` context processor, login and
-  error views
+- `omron_data/` — settings, the CSP and cache-control middleware, URLs, WSGI entry point,
+  `app_info` context processor, login and error views
 - `parsing/` — the OMRON connect report parser, no Django imports
 - `records/` — models, metric registry, importer, management commands, JSON API, queries,
   page views, chart geometry (`reports.py`), SQLite pragmas (`db.py`), templates, static
@@ -51,5 +52,5 @@ export OMRON_SECRET_KEY="$(python -c 'import secrets; print(secrets.token_urlsaf
 ## Definition of done for a change
 
 `uv run pytest -q`, `ruff check`, `ruff format --check` and `makemigrations --check --dry-run`
-pass, `tools/check_no_private_data.py` finds nothing, and no private data is present in the
-tree.
+pass, `tools/check_no_private_data.py` finds nothing, `--untracked` finds nothing in the files
+git does not track yet, and no private data is present in the tree.

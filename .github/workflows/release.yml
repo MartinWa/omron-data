@@ -121,6 +121,7 @@ jobs:
           target: production
           platforms: linux/amd64
           provenance: false
+          no-cache: true
           outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
           build-args: |
             OMRON_VERSION=${{ steps.release.outputs.version }}
@@ -139,6 +140,7 @@ jobs:
           target: production
           platforms: linux/arm64
           provenance: false
+          no-cache: true
           outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
           build-args: |
             OMRON_VERSION=${{ steps.release.outputs.version }}

@@ -27,4 +27,4 @@ def not_found(request, exception):
 def server_error(request):
     user = getattr(request, "user", None) or AnonymousUser()
     context = {**app_info(None), "user": user}
-    return HttpResponse(render_to_string("500.html", context), status=500)
+    return HttpResponse(render_to_string("500.html", context, request=request), status=500)

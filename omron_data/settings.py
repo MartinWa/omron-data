@@ -54,6 +54,7 @@ def secret_key(debug: bool) -> str:
 
 DEBUG = boolean_setting("OMRON_DEBUG")
 SECRET_KEY = secret_key(DEBUG)
+OMRON_TRUSTED_PROXY = read_setting("OMRON_TRUSTED_PROXY")
 
 _hosts = read_setting("OMRON_ALLOWED_HOSTS") or "127.0.0.1,localhost"
 ALLOWED_HOSTS = [host.strip() for host in _hosts.split(",") if host.strip()]
@@ -62,7 +63,30 @@ CSRF_TRUSTED_ORIGINS = [
     for origin in read_setting("OMRON_CSRF_TRUSTED_ORIGINS").split(",")
     if origin.strip()
 ]
-SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+
+
+def verify_origins(hosts: list[str], origins: list[str]) -> None:
+    for host in hosts:
+        if host.strip() == "*":
+            raise ImproperlyConfigured(
+                "OMRON_ALLOWED_HOSTS must name every hostname the proxy forwards; "
+                "'*' would accept any Host header."
+            )
+    for origin in origins:
+        if not origin.strip().startswith("https://"):
+            raise ImproperlyConfigured(
+                f"OMRON_CSRF_TRUSTED_ORIGINS entries must start with https://, not {origin!r}."
+            )
+
+
+verify_origins(ALLOWED_HOSTS, CSRF_TRUSTED_ORIGINS)
+
+
+def proxy_ssl_header(trusted_proxy: str) -> tuple[str, str] | None:
+    return ("HTTP_X_FORWARDED_PROTO", "https") if trusted_proxy.strip() else None
+
+
+SECURE_PROXY_SSL_HEADER = proxy_ssl_header(OMRON_TRUSTED_PROXY)
 SESSION_COOKIE_SECURE = not DEBUG
 CSRF_COOKIE_SECURE = not DEBUG
 
@@ -80,7 +104,6 @@ def default_time_zone() -> str:
 
 OMRON_TIME_ZONE = default_time_zone()
 OMRON_VERSION = read_setting("OMRON_VERSION")
-OMRON_TRUSTED_PROXY = read_setting("OMRON_TRUSTED_PROXY")
 
 INSTALLED_APPS = [
     "django.contrib.admin",
@@ -91,11 +114,13 @@ INSTALLED_APPS = [
     "django.contrib.staticfiles",
     "ninja",
     "records",
+    "axes",
 ]
 
 MIDDLEWARE = [
-    "records.middleware.ApiResponseMiddleware",
     "django.middleware.security.SecurityMiddleware",
+    "omron_data.middleware.ContentSecurityPolicyMiddleware",
+    "records.middleware.ApiResponseMiddleware",
     "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
@@ -103,6 +128,7 @@ MIDDLEWARE = [
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
+    "axes.middleware.AxesMiddleware",
 ]
 
 ROOT_URLCONF = "omron_data.urls"
@@ -135,12 +161,33 @@ DATABASES = {
 
 Path(DATABASES["default"]["NAME"]).parent.mkdir(parents=True, exist_ok=True)
 
+AUTHENTICATION_BACKENDS = [
+    "axes.backends.AxesStandaloneBackend",
+    "django.contrib.auth.backends.ModelBackend",
+]
+
 AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
     {"NAME": "django.contrib.auth.password_validation.MinimumLengthValidator"},
     {"NAME": "django.contrib.auth.password_validation.CommonPasswordValidator"},
     {"NAME": "django.contrib.auth.password_validation.NumericPasswordValidator"},
 ]
+
+AXES_ENABLED = True
+AXES_FAILURE_LIMIT = 5
+AXES_LOCKOUT_PARAMETERS = [["username", "ip_address"]]
+AXES_COOLOFF_TIME = 1
+AXES_RESET_ON_SUCCESS = True
+AXES_ENABLE_ACCESS_FAILURE_LOG = True
+AXES_IPWARE_META_PRECEDENCE_ORDER = ("HTTP_X_FORWARDED_FOR", "REMOTE_ADDR")
+
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "handlers": {"console": {"class": "logging.StreamHandler"}},
+    "root": {"handlers": ["console"], "level": "INFO"},
+    "loggers": {"axes": {"handlers": ["console"], "level": "INFO", "propagate": False}},
+}
 
 LANGUAGE_CODE = "en-us"
 TIME_ZONE = OMRON_TIME_ZONE
