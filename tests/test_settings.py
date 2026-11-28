@@ -299,6 +299,7 @@ def test_the_login_lockout_is_configured_on_the_username_and_the_client_address(
 def test_a_retry_during_a_lockout_neither_extends_it_nor_is_recorded_per_attempt():
     assert settings_module.AXES_RESET_COOL_OFF_ON_FAILURE_DURING_LOCKOUT is False
     assert settings_module.AXES_ENABLE_ACCESS_FAILURE_LOG is False
+    assert settings_module.AXES_DISABLE_ACCESS_LOG is True
     assert not hasattr(settings_module, "AXES_IPWARE_META_PRECEDENCE_ORDER")
 
 

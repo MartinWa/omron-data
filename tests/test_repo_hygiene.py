@@ -13,7 +13,7 @@ from tools.check_no_private_data import (
     content_violations,
     find_violations,
     main,
-    untracked_files,
+    untracked_paths,
 )
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -464,7 +464,7 @@ def test_the_untracked_scan_lists_only_files_git_does_not_ignore(tmp_path, monke
     (tmp_path / "export.csv").write_text("time,pulse\n", encoding="utf-8")
     monkeypatch.chdir(tmp_path)
 
-    assert sorted(untracked_files()) == [".gitignore", "notes.md"]
+    assert sorted(untracked_paths()) == [".gitignore", "notes.md"]
 
 
 def test_the_untracked_scan_reuses_the_name_and_content_checks(tmp_path, monkeypatch):
@@ -508,12 +508,24 @@ def test_a_large_jpeg_is_streamed_to_its_exif_marker(tmp_path):
     assert content_violations([str(jpeg)]) == [f"{jpeg}: JPEG Exif metadata"]
 
 
-def test_a_large_text_file_is_not_read(tmp_path):
+def test_text_beyond_two_megabytes_is_still_scanned(tmp_path):
     notes = tmp_path / "notes.md"
     email = "real.person" + "@" + "corp.example"
-    notes.write_text("x" * (MAX_SCAN_BYTES + 1) + email + "\n", encoding="utf-8")
+    filler = "readings\n" * (MAX_SCAN_BYTES // 8)
+    notes.write_text(filler + f"contact {email}\n", encoding="utf-8")
 
-    assert content_violations([str(notes)]) == []
+    assert content_violations([str(notes)]) == [
+        f"{notes}:{filler.count(chr(10)) + 1}: email address"
+    ]
+
+
+def test_an_over_long_line_is_reported_instead_of_dropped(tmp_path):
+    notes = tmp_path / "notes.md"
+    notes.write_text("x" * (MAX_SCAN_BYTES + 1) + "\n", encoding="utf-8")
+
+    assert content_violations([str(notes)]) == [
+        f"{notes}:1: line longer than {MAX_SCAN_BYTES} bytes, not scanned"
+    ]
 
 
 def test_an_image_that_cannot_be_inspected_is_reported(tmp_path):
@@ -533,31 +545,90 @@ def test_the_scan_never_follows_a_symlink(tmp_path):
     except OSError, NotImplementedError:
         pytest.skip("this platform cannot create symlinks")
 
-    assert content_violations([str(link)]) == [f"{link}: symlink not followed"]
+    assert content_violations([str(link)]) == [f"{link}: symbolic link not inspected"]
 
 
-def test_staged_content_is_scanned_after_the_file_is_removed(tmp_path, monkeypatch):
-    git_init(tmp_path)
+def stage_secret(directory):
     email = "real.person" + "@" + "corp.example"
-    notes = tmp_path / "notes.md"
+    notes = directory / "notes.md"
     notes.write_text(f"contact {email}\n", encoding="utf-8")
-    subprocess.run(["git", "add", "notes.md"], cwd=tmp_path, check=True)  # noqa: S607
-    notes.unlink()
+    subprocess.run(["git", "add", "notes.md"], cwd=directory, check=True)  # noqa: S607
+    return notes
+
+
+def test_the_staged_scan_catches_content_removed_from_the_working_copy(
+    tmp_path, monkeypatch, capsys
+):
+    git_init(tmp_path)
+    stage_secret(tmp_path).unlink()
     monkeypatch.chdir(tmp_path)
 
-    assert content_violations(["notes.md"]) == ["notes.md:1: email address"]
+    assert main(["--staged"]) == 1
+    assert "notes.md:1: email address" in capsys.readouterr().out
 
 
-def test_staged_content_wins_over_a_clean_working_copy(tmp_path, monkeypatch):
+def test_the_staged_scan_catches_an_edit_that_was_never_staged(tmp_path, monkeypatch, capsys):
     git_init(tmp_path)
-    email = "real.person" + "@" + "corp.example"
+    stage_secret(tmp_path).write_text("contact nobody@example.com\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    assert main(["--staged"]) == 1
+    assert "notes.md:1: email address" in capsys.readouterr().out
+
+
+def test_the_staged_scan_catches_an_unstaged_secret(tmp_path, monkeypatch, capsys):
+    git_init(tmp_path)
     notes = tmp_path / "notes.md"
-    notes.write_text(f"contact {email}\n", encoding="utf-8")
-    subprocess.run(["git", "add", "notes.md"], cwd=tmp_path, check=True)  # noqa: S607
     notes.write_text("contact nobody@example.com\n", encoding="utf-8")
+    subprocess.run(["git", "add", "notes.md"], cwd=tmp_path, check=True)  # noqa: S607
+    email = "real.person" + "@" + "corp.example"
+    notes.write_text(f"contact {email}\n", encoding="utf-8")
     monkeypatch.chdir(tmp_path)
 
-    assert content_violations(["notes.md"]) == ["notes.md:1: email address"]
+    assert main(["--staged"]) == 1
+    assert "notes.md:1: email address" in capsys.readouterr().out
+
+
+def test_the_staged_scan_reports_a_staged_symlink(tmp_path, monkeypatch, capsys):
+    git_init(tmp_path)
+    email = "real.person" + "@" + "corp.example"
+    secret = tmp_path / "private.txt"
+    secret.write_text(f"contact {email}\n", encoding="utf-8")
+    link = tmp_path / "notes.md"
+    try:
+        link.symlink_to(secret)
+    except OSError, NotImplementedError:
+        pytest.skip("this platform cannot create symlinks")
+    subprocess.run(["git", "add", "notes.md"], cwd=tmp_path, check=True)  # noqa: S607
+    monkeypatch.chdir(tmp_path)
+
+    assert main(["--staged"]) == 1
+    output = capsys.readouterr().out
+    assert "notes.md: symbolic link not inspected" in output
+    assert "email address" not in output
+
+
+def test_the_staged_scan_needs_a_work_tree(tmp_path, monkeypatch, capsys):
+    (tmp_path / "notes.md").write_text("contact nobody@example.com\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    with pytest.raises(SystemExit) as exit_info:
+        main(["--staged"])
+
+    assert exit_info.value.code == 1
+    assert "needs a git work tree" in capsys.readouterr().err
+
+
+def test_the_default_scan_needs_no_git(tmp_path, monkeypatch):
+    def forbidden(*arguments, **keywords):
+        raise AssertionError("the default scan must not run git")
+
+    (tmp_path / "state.db").write_text("", encoding="utf-8")
+    monkeypatch.setattr("tools.check_no_private_data.subprocess.run", forbidden)
+    monkeypatch.setattr("tools.check_no_private_data.subprocess.Popen", forbidden)
+    monkeypatch.chdir(tmp_path)
+
+    assert main([]) == 1
 
 
 def test_private_data_scan_flags_a_fine_grained_github_token(tmp_path):
@@ -587,7 +658,7 @@ def test_the_untracked_scan_fails_clearly_without_git(tmp_path, monkeypatch, cap
         raise FileNotFoundError(2, "No such file or directory", "git")
 
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr("tools.check_no_private_data.untracked_files", missing_git)
+    monkeypatch.setattr("tools.check_no_private_data.untracked_paths", missing_git)
 
     with pytest.raises(SystemExit) as exit_info:
         main(["--untracked"])

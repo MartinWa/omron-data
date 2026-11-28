@@ -184,7 +184,10 @@ passwords for one username from one address lock that pair out for an hour, anot
 at the same address is unaffected, and a successful login clears the count for the account.
 The same limit covers `/accounts/login/` and `/admin/login/`, a locked-out attempt is
 answered with `429` rather than the login form, and retrying while locked out does not extend
-the hour.
+the window. The window itself rolls: each attempt stops counting once it is older than the
+cooloff, so the lockout lasts up to an hour and can lift sooner when the oldest failures of
+the burst age out, which is what happens when the five failures come from two browsers on one
+address at different times.
 
 The client address is the connection address: the one the server resolved, never a header the
 caller wrote. Behind the proxy that is the visitor's own address, because waitress replaces
@@ -199,10 +202,14 @@ the public network as described in [Proxy headers](#proxy-headers).
 
 Failures and lockouts are logged on the `axes` logger, which reaches the container's log:
 `docker compose logs -f web` shows them as they happen, and the container's own log rotation
-bounds what is kept. The limiter keeps a counter per username and address in the SQLite file
-(`axes_accessattempt`) so it survives a restart, and it writes no per-attempt record of the
-attempted usernames, addresses or user agents. A lockout therefore ends on its own after the
-hour, and a forgotten password is a wait rather than a restart:
+bounds what is kept. Successful sign-ins are not recorded at all.
+
+What the SQLite file does hold while a lockout is active is the limiter's own counter: one
+row per username, address and user agent in `axes_accessattempt`, with the failure count, the
+time of the last attempt and the filtered request data of the failed submission. Those rows
+survive a restart, and they are removed when they expire during later authentication activity,
+so a backup taken while a lockout is active can contain them. The lockout ends on its own
+after the hour, and a forgotten password is a wait rather than a restart:
 
 ```sh
 docker compose exec web python manage.py axes_reset_username <name>

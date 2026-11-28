@@ -23,6 +23,7 @@ uv run ruff check .
 uv run ruff format --check .
 uv run python manage.py makemigrations --check --dry-run
 uv run python tools/check_no_private_data.py
+uv run python tools/check_no_private_data.py --staged
 uv run python tools/check_no_private_data.py --untracked
 ```
 

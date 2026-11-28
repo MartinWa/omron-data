@@ -371,10 +371,11 @@ kinds of finding:
 - by name: a `.csv`, `.sqlite3`, `.db`, `.dump`, `.sql`, `.pdf`, archive or key file, `.env`
   other than `.env.example`, a `tokens.*` file, and anything under `planning/` or
   `reference/`
-- by text, in any file under 2 MB: a bearer token, a private key block, an AWS access key, a
-  classic or fine-grained GitHub token, a Slack token, an assigned secret such as
-  `password = "..."`, an e-mail address outside `example.com`, and an absolute host path such
-  as a home directory, `/root`, `/srv` or `/mnt`
+- by text, streamed line by line with no file-size cutoff: a bearer token, a private key
+  block, an AWS access key, a classic or fine-grained GitHub token, a Slack token, an assigned
+  secret such as `password = "..."`, an e-mail address outside `example.com`, and an absolute
+  host path such as a home directory, `/root`, `/srv` or `/mnt`. A single line above 2 MB is
+  reported as unscannable rather than silently dropped
 - inside an image of any size: a PNG `tEXt`, `iTXt`, `zTXt` or `eXIf` chunk, or JPEG Exif
   metadata, read by streaming the file rather than loading it, so size cannot hide metadata.
   A screenshot carries the host name of the machine it was taken on even when the pixels
@@ -382,14 +383,18 @@ kinds of finding:
 - a symbolic link: it is reported, never followed, so a link cannot pull an ignored or
   out-of-tree file into the scan
 
-That is the default mode, the one CI runs. It lists the working tree but reads the content of
-a file git tracks from the index, which is what a commit would contain: content staged and
-then removed from the working copy is still caught. Files git does not track are read from
-the working copy, and without git at all the whole tree is read from disk. `--untracked`
-scans the files git reports as untracked (`git ls-files --others --exclude-standard`) with
-the same checks, so `.gitignore` is respected and a file is checked before it can be staged;
-outside a work tree or without git on `PATH` it exits with a message saying so instead of a
-traceback.
+That is the default mode, the one CI runs: it walks the working tree and needs no git at all.
+
+Two flags cover what a walk cannot see. `--staged` reads the index, which is what a commit
+would contain, so content staged and then removed or edited away in the working copy is still
+caught; it lists the index with `git ls-files --stage -z`, reports a symbolic link without
+opening it, reads each blob by object id through one `git cat-file --batch` process, and also
+scans the working copy of every path `git status --porcelain -z` reports as changed, so a
+secret added but never staged is not invisible. `--untracked` scans the files git reports as
+untracked (`git ls-files --others --exclude-standard -z`) with the same checks, so
+`.gitignore` is respected and a file is checked before it can be staged. Both flags need a
+git work tree and say so instead of raising a traceback when there is none; a short read from
+git fails the check rather than reporting success.
 
 A line that legitimately has to look like private data can opt out by carrying the marker
 `hygiene: allow`. `planning/`, `reference/`, `.data/`, `data/`, `staticfiles/` and the cache
