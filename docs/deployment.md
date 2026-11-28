@@ -180,14 +180,17 @@ never sees another account's readings outside the admin.
 
 The application limits login attempts itself, so a limiter in front of it is defence in depth
 rather than a requirement. The limit is per username **and** client address: five wrong
-passwords for one username from one address lock that pair out for an hour, another account
-at the same address is unaffected, and a successful login clears the count for the account.
-The same limit covers `/accounts/login/` and `/admin/login/`, a locked-out attempt is
-answered with `429` rather than the login form, and retrying while locked out does not extend
-the window. The window itself rolls: each attempt stops counting once it is older than the
-cooloff, so the lockout lasts up to an hour and can lift sooner when the oldest failures of
-the burst age out, which is what happens when the five failures come from two browsers on one
-address at different times.
+passwords for one username from one address lock that pair out, another account at the same
+address is unaffected, and a successful login clears the count for the account. The same limit
+covers `/accounts/login/` and `/admin/login/`, a locked-out attempt is answered with `429`
+rather than the login form, and retrying while locked out does not extend the window.
+
+The lockout lasts up to one hour, not a guaranteed hour. Expiry runs per counted row rather
+than per failure: each counted failure refreshes the timestamp of its username, address and
+user agent row, so every failure in that row ages out together, one hour after that row's most
+recent counted failure. Two browsers on one address keep their own rows, so the count of one
+browser can expire while the other still holds a fresh one, and the lockout lifts as soon as
+no counted row remains.
 
 The client address is the connection address: the one the server resolved, never a header the
 caller wrote. Behind the proxy that is the visitor's own address, because waitress replaces
@@ -202,23 +205,29 @@ the public network as described in [Proxy headers](#proxy-headers).
 
 Failures and lockouts are logged on the `axes` logger, which reaches the container's log:
 `docker compose logs -f web` shows them as they happen, and the container's own log rotation
-bounds what is kept. Successful sign-ins are not recorded at all.
+bounds what is kept. A successful sign-in is still announced there at `INFO`, because axes
+emits that event whether or not it stores a row for it.
 
 What the SQLite file does hold while a lockout is active is the limiter's own counter: one
 row per username, address and user agent in `axes_accessattempt`, with the failure count, the
 time of the last attempt and the filtered request data of the failed submission. Those rows
 survive a restart, and they are removed when they expire during later authentication activity,
-so a backup taken while a lockout is active can contain them. The lockout ends on its own
-after the hour, and a forgotten password is a wait rather than a restart:
+so a backup taken while a lockout is active can contain them. The row expires on its own, so a
+forgotten password is a wait rather than a restart:
 
 ```sh
 docker compose exec web python manage.py axes_reset_username <name>
 ```
 
-`axes_reset_username` clears that account's counter. The `axes_reset_logs` command clears
-successful sign-in rows and `axes_reset_failure_logs` clears failure records, but neither is
-needed routinely here: the failure record is switched off, and the sign-in rows are only
-written for accounts that sign in successfully.
+`axes_reset_username` clears that account's counter, which also ends a lockout you do not
+want to wait out.
+
+Nothing else is kept. `AXES_ENABLE_ACCESS_FAILURE_LOG = False` in the settings stops a
+per-attempt failure table from being written, and `AXES_DISABLE_ACCESS_LOG = True` stops
+successful sign-ins from being stored. The only failure record outside the container log is
+the counter row above, and it disappears when it expires; the `axes_reset_logs` command would
+only clear successful sign-in rows and `axes_reset_failure_logs` only a failure table that is
+switched off here, so neither is needed routinely and the lockout simply expires.
 
 ## Connecting a reverse proxy
 

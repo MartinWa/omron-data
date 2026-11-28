@@ -2,6 +2,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -457,6 +458,25 @@ def git_init(directory: Path) -> None:
     subprocess.run(["git", "init", "-q"], cwd=directory, check=True)  # noqa: S607
 
 
+def commit_all(directory: Path) -> None:
+    subprocess.run(["git", "add", "-A"], cwd=directory, check=True)  # noqa: S607
+    subprocess.run(  # noqa: S603
+        [  # noqa: S607
+            "git",
+            "-c",
+            "user.email=nobody@example.com",
+            "-c",
+            "user.name=Hygiene Check",
+            "commit",
+            "-q",
+            "-m",
+            "fixture",
+        ],
+        cwd=directory,
+        check=True,
+    )
+
+
 def test_the_untracked_scan_lists_only_files_git_does_not_ignore(tmp_path, monkeypatch):
     git_init(tmp_path)
     (tmp_path / ".gitignore").write_text("*.csv\n", encoding="utf-8")
@@ -665,3 +685,75 @@ def test_the_untracked_scan_fails_clearly_without_git(tmp_path, monkeypatch, cap
 
     assert exit_info.value.code == 1
     assert "needs git" in capsys.readouterr().err
+
+
+def test_an_assigned_secret_is_read_from_the_whole_line(tmp_path):
+    notes = tmp_path / "notes.md"
+    assignment = "password" + ' = "' + "a" * 40 + '"'
+    notes.write_text("readings " * 20000 + assignment + "\n", encoding="utf-8")
+
+    assert content_violations([str(notes)]) == [f"{notes}:1: assigned secret"]
+
+
+def test_a_stray_at_sign_on_a_huge_line_is_rejected_cheaply(tmp_path):
+    notes = tmp_path / "notes.md"
+    notes.write_bytes(b"x" * (MAX_SCAN_BYTES - 64) + b"@\n")
+
+    started = time.monotonic()
+    assert content_violations([str(notes)]) == []
+    assert time.monotonic() - started < 5
+
+
+def test_a_dangling_symlink_is_reported_instead_of_dropped(tmp_path):
+    link = tmp_path / "notes.md"
+    try:
+        link.symlink_to(tmp_path / "gone.txt")
+    except OSError, NotImplementedError:
+        pytest.skip("this platform cannot create symlinks")
+
+    assert content_violations([str(link)]) == [f"{link}: symbolic link not inspected"]
+
+
+def test_the_staged_scan_reports_a_dangling_working_tree_symlink(tmp_path, monkeypatch, capsys):
+    git_init(tmp_path)
+    notes = tmp_path / "notes.md"
+    notes.write_text("readings\n", encoding="utf-8")
+    subprocess.run(["git", "add", "notes.md"], cwd=tmp_path, check=True)  # noqa: S607
+    notes.unlink()
+    try:
+        notes.symlink_to(tmp_path / "gone.txt")
+    except OSError, NotImplementedError:
+        pytest.skip("this platform cannot create symlinks")
+    monkeypatch.chdir(tmp_path)
+
+    assert main(["--staged"]) == 1
+    assert "notes.md: symbolic link not inspected" in capsys.readouterr().out
+
+
+def test_the_staged_scan_catches_an_edit_to_a_committed_file(tmp_path, monkeypatch, capsys):
+    git_init(tmp_path)
+    notes = tmp_path / "notes.md"
+    notes.write_text("contact nobody@example.com\n", encoding="utf-8")
+    commit_all(tmp_path)
+    email = "real.person" + "@" + "corp.example"
+    notes.write_text(f"contact {email}\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    assert main(["--staged"]) == 1
+    assert "notes.md:1: email address" in capsys.readouterr().out
+
+
+def test_the_staged_scan_keeps_the_new_path_of_a_rename(tmp_path, monkeypatch, capsys):
+    git_init(tmp_path)
+    notes = tmp_path / "notes.md"
+    notes.write_text("contact nobody@example.com\n", encoding="utf-8")
+    commit_all(tmp_path)
+    subprocess.run(["git", "mv", "notes.md", "moved.md"], cwd=tmp_path, check=True)  # noqa: S607
+    email = "real.person" + "@" + "corp.example"
+    (tmp_path / "moved.md").write_text(f"contact {email}\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    assert main(["--staged"]) == 1
+    output = capsys.readouterr().out
+    assert "moved.md:1: email address" in output
+    assert "notes.md:1: email address" not in output

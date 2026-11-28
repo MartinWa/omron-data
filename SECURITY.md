@@ -48,9 +48,10 @@ backups private: `OMRON_DB_PATH` decides where the file lives, `.data/db.sqlite3
 by default, and that directory is the thing to protect. Mark a token you no longer
 need as revoked instead of leaving it live. Login is rate-limited in the app: five wrong
 passwords for one username from one client address lock that pair out for up to an hour, with
-the counter kept in the same database as a row per username, address and user agent and
-removed when it expires; successful sign-ins are not recorded, and failures and lockouts go
-to the container log.
+the counter kept in the same database as one row per username, address and user agent, removed
+when it expires, so a backup taken during a lockout can hold it. Nothing else is stored:
+`AXES_ENABLE_ACCESS_FAILURE_LOG = False` and `AXES_DISABLE_ACCESS_LOG = True`. Failures,
+lockouts and successful sign-ins are all logged on the `axes` logger to the container log.
 
 Never paste a real export into an issue, a pull request or a paste site, not even a
 single row: one export is a person's whole history for the range it covers, and its

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import re
+import string
 import subprocess
 from collections.abc import Iterable, Iterator
 from pathlib import Path, PurePosixPath
@@ -59,34 +60,81 @@ JPEG_EXIF_MARKER = b"Exif\x00\x00"
 IMAGE_SUFFIXES = (".png", ".jpg", ".jpeg")
 SYMLINK_MODE = "120000"
 
+LOCAL_PART_CHARACTERS = frozenset(string.ascii_letters + string.digits + "._%+-")
+DOMAIN_CHARACTERS = frozenset(string.ascii_letters + string.digits + ".-")
+DOMAIN_END = re.compile(r"[A-Za-z0-9.-]+\.[A-Za-z]{2,}\Z")
+PUBLIC_EXAMPLE_DOMAINS = ("example.com", "example.org", "example.net")
+LOCAL_PART_LIMIT = 64
+DOMAIN_LIMIT = 255
+
+
+def has_email_address(line: str) -> bool:
+    position = line.find("@")
+    while position >= 0:
+        start = position
+        while (
+            start > 0
+            and position - start < LOCAL_PART_LIMIT
+            and line[start - 1] in LOCAL_PART_CHARACTERS
+        ):
+            start -= 1
+        end = position + 1
+        while end < len(line) and end - position <= DOMAIN_LIMIT and line[end] in DOMAIN_CHARACTERS:
+            end += 1
+        domain = line[position + 1 : end]
+        if (
+            start < position
+            and DOMAIN_END.match(domain)
+            and not domain.startswith(PUBLIC_EXAMPLE_DOMAINS)
+        ):
+            return True
+        position = line.find("@", position + 1)
+    return False
+
+
+def contains(pattern: re.Pattern, *needles: str):
+    def detector(line: str) -> bool:
+        return any(needle in line for needle in needles) and pattern.search(line) is not None
+
+    return detector
+
+
 CONTENT_PATTERNS = (
-    ("bearer token", ("earer",), re.compile(r"[Bb]earer\s+[A-Za-z0-9._~+/=-]{20,}")),
-    ("private key block", ("PRIVATE KEY",), re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----")),
-    ("AWS access key", ("AKIA",), re.compile(r"AKIA[0-9A-Z]{16}")),
+    ("bearer token", contains(re.compile(r"[Bb]earer\s+[A-Za-z0-9._~+/=-]{20,}"), "earer")),
+    (
+        "private key block",
+        contains(re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----"), "PRIVATE KEY"),
+    ),
+    ("AWS access key", contains(re.compile(r"AKIA[0-9A-Z]{16}"), "AKIA")),
     (
         "GitHub token",
-        ("gh", "github"),
-        re.compile(r"gh[pousr]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{22,}"),
-    ),
-    ("Slack token", ("xox",), re.compile(r"xox[baprs]-[A-Za-z0-9-]{10,}")),
-    (
-        "assigned secret",
-        ("=", ":"),
-        re.compile(
-            r"(?i)\b(secret[_-]?key|api[_-]?key|token|password)\b\s*[:=]\s*[\"']"
-            r"[A-Za-z0-9_\-/+]{32,}[\"']"
+        contains(
+            re.compile(r"gh[pousr]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{22,}"),
+            "gh",
+            "github_pat_",
         ),
     ),
+    ("Slack token", contains(re.compile(r"xox[baprs]-[A-Za-z0-9-]{10,}"), "xox")),
     (
-        "email address",
-        ("@",),
-        re.compile(r"[A-Za-z0-9._%+-]+@(?!example\.(?:com|org|net)\b)[A-Za-z0-9.-]+\.[A-Za-z]{2,}"),
+        "assigned secret",
+        contains(
+            re.compile(
+                r"(?i)\b(secret[_-]?key|api[_-]?key|token|password)\b\s*[:=]\s*[\"']"
+                r"[A-Za-z0-9_\-/+]{32,}[\"']"
+            ),
+            "=",
+            ":",
+        ),
     ),
+    ("email address", has_email_address),
     (
         "absolute host path",
-        ("/", "\\"),
-        re.compile(
-            r"(?:[A-Za-z]:\\Users\\|/Users/[A-Za-z]|/home/(?!developer\b)[A-Za-z]|/(?:root|srv|mnt)/)"
+        contains(
+            re.compile(
+                r"(?:[A-Za-z]:\\Users\\|/Users/[A-Za-z]|/home/(?!developer\b)[A-Za-z]|/(?:root|srv|mnt)/)"
+            ),
+            "/",
+            "\\",
         ),
     ),
 )
@@ -151,13 +199,7 @@ def line_violations(path: str, number: int, raw: bytes) -> list[str]:
     line = raw.decode("utf-8", errors="ignore")
     if ALLOW_MARKER in line:
         return []
-    findings = []
-    for label, needles, pattern in CONTENT_PATTERNS:
-        if not any(needle in line for needle in needles):
-            continue
-        if pattern.search(line):
-            findings.append(f"{path}:{number}: {label}")
-    return findings
+    return [f"{path}:{number}: {label}" for label, detector in CONTENT_PATTERNS if detector(line)]
 
 
 def text_violations(path: str, stream) -> list[str]:
@@ -261,11 +303,18 @@ def content_violations(paths: Iterable[str]) -> list[str]:
     return findings
 
 
+def present_in_worktree(candidate: Path) -> bool:
+    try:
+        candidate.lstat()
+    except OSError:
+        return False
+    return True
+
+
 def worktree_violations(paths: Iterable[str]) -> list[str]:
     findings: list[str] = []
     for path in paths:
-        candidate = Path(path)
-        if not candidate.is_symlink() and not candidate.is_file():
+        if not present_in_worktree(Path(path)):
             continue
         findings.extend(file_violations(path))
     return findings
@@ -305,11 +354,14 @@ def changed_paths() -> list[str]:
     while index < len(fields):
         record = fields[index]
         index += 1
-        status, _, path = record.partition(b" ")
-        if status == b"??":
+        if len(record) < 4:
             continue
+        status = record[:2]
+        path = record[3:]
         if b"R" in status or b"C" in status:
             index += 1
+        if status == b"??":
+            continue
         paths.append(path.decode())
     return paths
 
