@@ -307,8 +307,7 @@ def test_operational_tools_use_the_standard_library_only():
         "settings.DEBUG",
         "check_trusted_proxy",
         "PLACEHOLDER_SECRET_KEYS",
-        "mode=rw",
-        "migration_plan",
+        'probe_database(connections["default"])',
     ):
         assert gate in production
 

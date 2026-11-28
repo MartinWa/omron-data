@@ -41,7 +41,7 @@ Three more worth running before a pull request or a release, all runnable the sa
 | Command | What it checks |
 | --- | --- |
 | `uv run python manage.py check` | Django's own system checks |
-| `uv run python tools/check_production.py` | That the installation is configured for production: `OMRON_DEBUG` off, a private secret, a writable database, every migration applied |
+| `uv run python tools/check_production.py` | Production configuration, including `OMRON_DEBUG` off, a declared trusted proxy, a private secret, a writable database and complete, consistent migration history |
 | `uv run python tools/check_no_private_data.py` | That the working tree carries no private data |
 
 ## Releasing
