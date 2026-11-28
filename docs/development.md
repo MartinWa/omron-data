@@ -371,19 +371,25 @@ kinds of finding:
 - by name: a `.csv`, `.sqlite3`, `.db`, `.dump`, `.sql`, `.pdf`, archive or key file, `.env`
   other than `.env.example`, a `tokens.*` file, and anything under `planning/` or
   `reference/`
-- by content, in any file under 2 MB: a bearer token, a private key block, an AWS access
-  key, a GitHub or Slack token, an assigned secret such as `password = "..."`, an e-mail
-  address outside `example.com`, and an absolute host path such as a home directory,
-  `/root`, `/srv` or `/mnt`
-- inside an image under the same 2 MB, because the size guard runs before anything is read:
-  a PNG `tEXt`, `iTXt`, `zTXt` or `eXIf` chunk, or JPEG Exif metadata. A screenshot carries
-  the host name of the machine it was taken on even when the pixels themselves are harmless
+- by text, in any file under 2 MB: a bearer token, a private key block, an AWS access key, a
+  classic or fine-grained GitHub token, a Slack token, an assigned secret such as
+  `password = "..."`, an e-mail address outside `example.com`, and an absolute host path such
+  as a home directory, `/root`, `/srv` or `/mnt`
+- inside an image of any size: a PNG `tEXt`, `iTXt`, `zTXt` or `eXIf` chunk, or JPEG Exif
+  metadata, read by streaming the file rather than loading it, so size cannot hide metadata.
+  A screenshot carries the host name of the machine it was taken on even when the pixels
+  themselves are harmless, and an image that cannot be read is reported rather than passed
+- a symbolic link: it is reported, never followed, so a link cannot pull an ignored or
+  out-of-tree file into the scan
 
-That is the default mode, the one CI runs, and it needs no git at all. `--untracked` scans
-the files git reports as untracked (`git ls-files --others --exclude-standard`) with the same
-name and content checks, so `.gitignore` is respected and a file is checked before it can be
-staged; outside a work tree or without git on `PATH` it exits with a message saying so
-instead of a traceback.
+That is the default mode, the one CI runs. It lists the working tree but reads the content of
+a file git tracks from the index, which is what a commit would contain: content staged and
+then removed from the working copy is still caught. Files git does not track are read from
+the working copy, and without git at all the whole tree is read from disk. `--untracked`
+scans the files git reports as untracked (`git ls-files --others --exclude-standard`) with
+the same checks, so `.gitignore` is respected and a file is checked before it can be staged;
+outside a work tree or without git on `PATH` it exits with a message saying so instead of a
+traceback.
 
 A line that legitimately has to look like private data can opt out by carrying the marker
 `hygiene: allow`. `planning/`, `reference/`, `.data/`, `data/`, `staticfiles/` and the cache

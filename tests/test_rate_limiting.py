@@ -1,4 +1,5 @@
 import pytest
+from axes.models import AccessAttempt
 from axes.utils import reset
 from django.test import override_settings
 from django.urls import reverse
@@ -31,11 +32,11 @@ def other_account(bob):
     return bob
 
 
-def sign_in(client, route, username, password):
+def sign_in(client, route, username, password, address=CLIENT_ADDRESS):
     return client.post(
         reverse(route),
         {"username": username, "password": password},
-        headers={"x-forwarded-for": CLIENT_ADDRESS},
+        REMOTE_ADDR=address,
     )
 
 
@@ -89,9 +90,17 @@ def test_a_lockout_is_confined_to_the_address_it_came_from(client, account):
     fail_until_locked(client, "login", account)
 
     assert sign_in(client, "login", account.username, PASSWORD).status_code == 429
-    elsewhere = client.post(
-        reverse("login"),
-        {"username": account.username, "password": PASSWORD},
-        headers={"x-forwarded-for": "198.51.100.9"},
-    )
-    assert elsewhere.status_code == 302
+    assert sign_in(client, "login", account.username, PASSWORD, "198.51.100.9").status_code == 302
+
+
+@pytest.mark.django_db
+@override_settings(AXES_ENABLED=True, AXES_FAILURE_LIMIT=FAILURES_TO_LOCK)
+def test_a_blocked_retry_does_not_move_the_lockout_expiry(client, account):
+    fail_until_locked(client, "login", account)
+    locked = AccessAttempt.objects.get(username=account.username)
+
+    assert sign_in(client, "login", account.username, PASSWORD).status_code == 429
+
+    retried = AccessAttempt.objects.get(username=account.username)
+    assert retried.attempt_time == locked.attempt_time
+    assert retried.failures_since_start == locked.failures_since_start

@@ -47,8 +47,9 @@ Run the app behind a TLS reverse proxy; it publishes no ports. Set
 backups private: `OMRON_DB_PATH` decides where the file lives, `.data/db.sqlite3`
 by default, and that directory is the thing to protect. Mark a token you no longer
 need as revoked instead of leaving it live. Login is rate-limited in the app: five wrong
-passwords for one username from one client address lock that pair out for an hour, and both
-the failures and the lockouts are logged and stored in the same database.
+passwords for one username from one client address lock that pair out for an hour, with a
+counter in the same database and no per-attempt record of usernames, addresses or user
+agents; failures and lockouts go to the container log.
 
 Never paste a real export into an issue, a pull request or a paste site, not even a
 single row: one export is a person's whole history for the range it covers, and its

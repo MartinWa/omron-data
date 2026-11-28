@@ -7,6 +7,7 @@ scan by carrying the marker ``hygiene: allow``.
 from __future__ import annotations
 
 import argparse
+import io
 import re
 import subprocess
 from collections.abc import Iterable, Iterator
@@ -51,16 +52,19 @@ SKIPPED_DIRECTORIES = frozenset(
     }
 )
 MAX_SCAN_BYTES = 2 * 1024 * 1024
+MAX_INDEX_BYTES = 16 * 1024 * 1024
+READ_CHUNK_BYTES = 64 * 1024
 ALLOW_MARKER = "hygiene: allow"
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 PNG_METADATA_CHUNKS = frozenset({b"tEXt", b"iTXt", b"zTXt", b"eXIf"})
 JPEG_EXIF_MARKER = b"Exif\x00\x00"
+IMAGE_SUFFIXES = (".png", ".jpg", ".jpeg")
 
 CONTENT_PATTERNS = (
     ("bearer token", re.compile(r"[Bb]earer\s+[A-Za-z0-9._~+/=-]{20,}")),
     ("private key block", re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----")),
     ("AWS access key", re.compile(r"AKIA[0-9A-Z]{16}")),
-    ("GitHub token", re.compile(r"gh[pousr]_[A-Za-z0-9]{36,}")),
+    ("GitHub token", re.compile(r"gh[pousr]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{22,}")),
     ("Slack token", re.compile(r"xox[baprs]-[A-Za-z0-9-]{10,}")),
     (
         "assigned secret",
@@ -102,53 +106,130 @@ def find_violations(paths: Iterable[str]) -> list[str]:
     return sorted(path for path in paths if is_violation(path))
 
 
-def png_metadata_chunks(data: bytes) -> list[str]:
+def png_metadata_chunks(stream) -> list[str]:
+    if stream.read(len(PNG_SIGNATURE)) != PNG_SIGNATURE:
+        raise ValueError("the file does not start with the PNG signature")
     chunks = []
-    offset = len(PNG_SIGNATURE)
-    while offset + 8 <= len(data):
-        length = int.from_bytes(data[offset : offset + 4], "big")
-        chunk_type = data[offset + 4 : offset + 8]
+    while True:
+        header = stream.read(8)
+        if len(header) < 8:
+            raise ValueError("the file ends before its IEND chunk")
+        length = int.from_bytes(header[:4], "big")
+        chunk_type = header[4:8]
         if chunk_type in PNG_METADATA_CHUNKS:
             chunks.append(chunk_type.decode("latin-1"))
-        offset += 12 + length
         if chunk_type == b"IEND":
-            break
-    return chunks
+            return chunks
+        stream.seek(length + 4, io.SEEK_CUR)
+
+
+def jpeg_has_exif(stream) -> bool:
+    overlap = len(JPEG_EXIF_MARKER) - 1
+    carried = b""
+    while True:
+        block = stream.read(READ_CHUNK_BYTES)
+        if not block:
+            return False
+        if JPEG_EXIF_MARKER in carried + block:
+            return True
+        carried = (carried + block)[-overlap:]
+
+
+def image_violations(path: str, name: str, stream) -> list[str]:
+    try:
+        if name.endswith(".png"):
+            return [f"{path}: PNG {chunk} metadata chunk" for chunk in png_metadata_chunks(stream)]
+        if jpeg_has_exif(stream):
+            return [f"{path}: JPEG Exif metadata"]
+        return []
+    except OSError, ValueError:
+        return [f"{path}: image metadata not inspectable"]
+
+
+def text_violations(path: str, data: bytes) -> list[str]:
+    findings = []
+    text = data.decode("utf-8", errors="ignore")
+    for line_number, line in enumerate(text.splitlines(), start=1):
+        if ALLOW_MARKER in line:
+            continue
+        for label, pattern in CONTENT_PATTERNS:
+            if pattern.search(line):
+                findings.append(f"{path}:{line_number}: {label}")
+    return findings
+
+
+def path_violations(path: str) -> list[str]:
+    candidate = Path(path)
+    if candidate.is_symlink():
+        return [f"{path}: symlink not followed"]
+    name = candidate.name.lower()
+    try:
+        with candidate.open("rb") as stream:
+            if name.endswith(IMAGE_SUFFIXES):
+                return image_violations(path, name, stream)
+            if candidate.stat().st_size > MAX_SCAN_BYTES:
+                return []
+            return text_violations(path, stream.read(MAX_SCAN_BYTES))
+    except OSError:
+        return [f"{path}: file not readable"]
+
+
+def staged_violations(path: str, data: bytes) -> list[str]:
+    name = PurePosixPath(path).name.lower()
+    if name.endswith(IMAGE_SUFFIXES):
+        return image_violations(path, name, io.BytesIO(data))
+    if len(data) > MAX_SCAN_BYTES:
+        return []
+    return text_violations(path, data)
+
+
+def index_content(paths: list[str]) -> tuple[dict[str, bytes], list[str]]:
+    if not paths:
+        return {}, []
+    result = subprocess.run(
+        ["git", "cat-file", "--batch"],  # noqa: S607
+        input="".join(f":{path}\n" for path in paths).encode(),
+        capture_output=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        return {}, []
+    blobs: dict[str, bytes] = {}
+    oversized: list[str] = []
+    stream = io.BytesIO(result.stdout)
+    for path in paths:
+        header = stream.readline()
+        if not header or header.rstrip().endswith(b" missing"):
+            continue
+        size = int(header.split()[2])
+        if size > MAX_INDEX_BYTES:
+            oversized.append(path)
+            stream.seek(size, io.SEEK_CUR)
+        else:
+            blobs[path] = stream.read(size)
+        stream.read(1)
+    return blobs, oversized
 
 
 def content_violations(paths: Iterable[str]) -> list[str]:
-    findings = []
-    for path in paths:
-        candidate = Path(path)
-        name = candidate.name.lower()
-        try:
-            if candidate.stat().st_size > MAX_SCAN_BYTES:
-                continue
-            if name.endswith(".png"):
-                data = candidate.read_bytes()
-                if data.startswith(PNG_SIGNATURE):
-                    for chunk in png_metadata_chunks(data):
-                        findings.append(f"{path}: PNG {chunk} metadata chunk")
-                continue
-            if name.endswith((".jpg", ".jpeg")):
-                if JPEG_EXIF_MARKER in candidate.read_bytes():
-                    findings.append(f"{path}: JPEG Exif metadata")
-                continue
-            text = candidate.read_text(encoding="utf-8")
-        except OSError, UnicodeDecodeError:
-            continue
-        for line_number, line in enumerate(text.splitlines(), start=1):
-            if ALLOW_MARKER in line:
-                continue
-            for label, pattern in CONTENT_PATTERNS:
-                if pattern.search(line):
-                    findings.append(f"{path}:{line_number}: {label}")
+    listed = list(paths)
+    blobs, oversized = index_content([path for path in listed if not is_violation(path)])
+    findings: list[str] = []
+    for path in listed:
+        if path in blobs:
+            findings.extend(staged_violations(path, blobs[path]))
+        elif path in oversized:
+            findings.append(f"{path}: staged content over {MAX_INDEX_BYTES} bytes, not inspected")
+        else:
+            findings.extend(path_violations(path))
     return findings
 
 
 def walk(directory: Path, root: Path) -> Iterator[str]:
     for entry in sorted(directory.iterdir()):
-        if entry.is_dir():
+        if entry.is_symlink():
+            yield entry.relative_to(root).as_posix()
+        elif entry.is_dir():
             if entry.name in SKIPPED_DIRECTORIES:
                 continue
             yield from walk(entry, root)

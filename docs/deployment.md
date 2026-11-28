@@ -182,25 +182,36 @@ The application limits login attempts itself, so a limiter in front of it is def
 rather than a requirement. The limit is per username **and** client address: five wrong
 passwords for one username from one address lock that pair out for an hour, another account
 at the same address is unaffected, and a successful login clears the count for the account.
-The same limit covers `/accounts/login/` and `/admin/login/`, and a locked-out attempt is
-answered with `429` rather than the login form.
+The same limit covers `/accounts/login/` and `/admin/login/`, a locked-out attempt is
+answered with `429` rather than the login form, and retrying while locked out does not extend
+the hour.
 
-The client address is the one the proxy reports in `X-Forwarded-For`. waitress passes that
-header on only for a peer declared in `OMRON_TRUSTED_PROXY` and discards it from any other,
-so with a proxy in front the address is the visitor's own rather than the proxy's. A wildcard
-`OMRON_TRUSTED_PROXY=*` trusts every peer, so anything that can reach the port directly can
-send its own `X-Forwarded-For` and choose the address the limiter counts against: that evades
-the limit, it does not reach another account. It is the same trust the scheme already gets,
-so keep the port off the public network as described in [Proxy headers](#proxy-headers).
+The client address is the connection address: the one the server resolved, never a header the
+caller wrote. Behind the proxy that is the visitor's own address, because waitress replaces
+the peer address with the proxy's `X-Forwarded-For` entry for a peer declared in
+`OMRON_TRUSTED_PROXY` and discards both forwarded headers from any other. The development
+entry point is the exception: `runserver` performs no such filtering, so a forwarding header
+sent to it is ignored for this purpose and every caller counts as `127.0.0.1`. A wildcard
+`OMRON_TRUSTED_PROXY=*` trusts every peer, so anything that can reach the published port
+directly can choose the address the limiter counts against: that evades the limit, it does
+not reach another account. It is the same trust the scheme already gets, so keep the port off
+the public network as described in [Proxy headers](#proxy-headers).
 
-Attempts and lockouts are database rows in the same SQLite file (`axes_accessattempt` and
-`axes_accessfailurelog`), and every one of them is logged on the `axes` logger, so
-`docker compose logs -f web` shows the failures as they happen. A forgotten password is
-therefore a one-hour wait or a row to clear, not a restart:
+Failures and lockouts are logged on the `axes` logger, which reaches the container's log:
+`docker compose logs -f web` shows them as they happen, and the container's own log rotation
+bounds what is kept. The limiter keeps a counter per username and address in the SQLite file
+(`axes_accessattempt`) so it survives a restart, and it writes no per-attempt record of the
+attempted usernames, addresses or user agents. A lockout therefore ends on its own after the
+hour, and a forgotten password is a wait rather than a restart:
 
 ```sh
 docker compose exec web python manage.py axes_reset_username <name>
 ```
+
+`axes_reset_username` clears that account's counter. The `axes_reset_logs` command clears
+successful sign-in rows and `axes_reset_failure_logs` clears failure records, but neither is
+needed routinely here: the failure record is switched off, and the sign-in rows are only
+written for accounts that sign in successfully.
 
 ## Connecting a reverse proxy
 

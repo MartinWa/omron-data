@@ -489,13 +489,83 @@ def test_a_committed_pdf_is_refused_by_name():
     ]
 
 
-def test_an_oversized_image_is_skipped_before_it_is_read(tmp_path):
+def test_an_image_above_the_read_limit_is_still_inspected(tmp_path):
     png = tmp_path / "huge.png"
     png.write_bytes(
-        PNG_SIGNATURE + png_chunk(b"tEXt", b"Comment\x00synthetic") + b"\x00" * MAX_SCAN_BYTES
+        PNG_SIGNATURE
+        + png_chunk(b"prVt", b"\x00" * (MAX_SCAN_BYTES + 1))
+        + png_chunk(b"tEXt", b"Comment\x00synthetic")
+        + png_chunk(b"IEND", b"")
     )
 
-    assert content_violations([str(png)]) == []
+    assert content_violations([str(png)]) == [f"{png}: PNG tEXt metadata chunk"]
+
+
+def test_a_large_jpeg_is_streamed_to_its_exif_marker(tmp_path):
+    jpeg = tmp_path / "huge.jpg"
+    jpeg.write_bytes(b"\xff\xd8" + b"\x00" * (MAX_SCAN_BYTES + 1) + b"Exif\x00\x00" + b"\xff\xd9")
+
+    assert content_violations([str(jpeg)]) == [f"{jpeg}: JPEG Exif metadata"]
+
+
+def test_a_large_text_file_is_not_read(tmp_path):
+    notes = tmp_path / "notes.md"
+    email = "real.person" + "@" + "corp.example"
+    notes.write_text("x" * (MAX_SCAN_BYTES + 1) + email + "\n", encoding="utf-8")
+
+    assert content_violations([str(notes)]) == []
+
+
+def test_an_image_that_cannot_be_inspected_is_reported(tmp_path):
+    broken = tmp_path / "broken.png"
+    broken.write_bytes(b"not a png at all")
+
+    assert content_violations([str(broken)]) == [f"{broken}: image metadata not inspectable"]
+
+
+def test_the_scan_never_follows_a_symlink(tmp_path):
+    email = "real.person" + "@" + "corp.example"
+    secret = tmp_path / "private.txt"
+    secret.write_text(f"contact {email}\n", encoding="utf-8")
+    link = tmp_path / "notes.md"
+    try:
+        link.symlink_to(secret)
+    except OSError, NotImplementedError:
+        pytest.skip("this platform cannot create symlinks")
+
+    assert content_violations([str(link)]) == [f"{link}: symlink not followed"]
+
+
+def test_staged_content_is_scanned_after_the_file_is_removed(tmp_path, monkeypatch):
+    git_init(tmp_path)
+    email = "real.person" + "@" + "corp.example"
+    notes = tmp_path / "notes.md"
+    notes.write_text(f"contact {email}\n", encoding="utf-8")
+    subprocess.run(["git", "add", "notes.md"], cwd=tmp_path, check=True)  # noqa: S607
+    notes.unlink()
+    monkeypatch.chdir(tmp_path)
+
+    assert content_violations(["notes.md"]) == ["notes.md:1: email address"]
+
+
+def test_staged_content_wins_over_a_clean_working_copy(tmp_path, monkeypatch):
+    git_init(tmp_path)
+    email = "real.person" + "@" + "corp.example"
+    notes = tmp_path / "notes.md"
+    notes.write_text(f"contact {email}\n", encoding="utf-8")
+    subprocess.run(["git", "add", "notes.md"], cwd=tmp_path, check=True)  # noqa: S607
+    notes.write_text("contact nobody@example.com\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    assert content_violations(["notes.md"]) == ["notes.md:1: email address"]
+
+
+def test_private_data_scan_flags_a_fine_grained_github_token(tmp_path):
+    sample = tmp_path / "notes.md"
+    token = "github" + "_pat_" + "11A" + "b" * 20 + "_" + "c" * 40
+    sample.write_text(f"{token}\n", encoding="utf-8")
+
+    assert content_violations([str(sample)]) == [f"{sample}:1: GitHub token"]
 
 
 def test_the_untracked_scan_fails_clearly_outside_a_work_tree(tmp_path):

@@ -294,7 +294,12 @@ def test_the_login_lockout_is_configured_on_the_username_and_the_client_address(
     assert settings_module.AXES_LOCKOUT_PARAMETERS == [["username", "ip_address"]]
     assert settings_module.AXES_COOLOFF_TIME == 1
     assert settings_module.AXES_RESET_ON_SUCCESS is True
-    assert settings_module.AXES_ENABLE_ACCESS_FAILURE_LOG is True
+
+
+def test_a_retry_during_a_lockout_neither_extends_it_nor_is_recorded_per_attempt():
+    assert settings_module.AXES_RESET_COOL_OFF_ON_FAILURE_DURING_LOCKOUT is False
+    assert settings_module.AXES_ENABLE_ACCESS_FAILURE_LOG is False
+    assert not hasattr(settings_module, "AXES_IPWARE_META_PRECEDENCE_ORDER")
 
 
 def test_axes_logs_on_its_own_console_logger():
